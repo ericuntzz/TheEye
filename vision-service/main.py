@@ -12,9 +12,21 @@ app = FastAPI(
     version="0.1.0",
 )
 
+origins = ["http://localhost:5000"]
+replit_domain = os.getenv("REPLIT_DEV_DOMAIN")
+if replit_domain:
+    origins.append(f"https://{replit_domain}")
+replit_domains = os.getenv("REPLIT_DOMAINS")
+if replit_domains:
+    for domain in replit_domains.split(","):
+        origins.append(f"https://{domain.strip()}")
+custom_origins = os.getenv("ALLOWED_ORIGINS")
+if custom_origins:
+    origins.extend(custom_origins.split(","))
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("ALLOWED_ORIGINS", "http://localhost:5000,https://*.replit.dev,https://*.replit.app,https://*.repl.co").split(","),
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
