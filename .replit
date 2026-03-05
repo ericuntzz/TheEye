@@ -26,13 +26,13 @@ args = "Vision Service"
 name = "Start application"
 author = "agent"
 
+[workflows.workflow.metadata]
+outputType = "webview"
+
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "npm run dev"
 waitForPort = 5000
-
-[workflows.workflow.metadata]
-outputType = "webview"
 
 [[workflows.workflow]]
 name = "Vision Service"
@@ -47,12 +47,12 @@ waitForPort = 8000
 outputType = "console"
 
 [[ports]]
-localPort = 5000
-externalPort = 80
+localPort = 3000
+externalPort = 3000
 
 [[ports]]
-localPort = 8000
-externalPort = 8000
+localPort = 5000
+externalPort = 80
 
 [deployment]
 deploymentTarget = "autoscale"
