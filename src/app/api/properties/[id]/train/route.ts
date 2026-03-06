@@ -80,7 +80,6 @@ export async function POST(
     .where(eq(properties.id, id));
 
   try {
-    // Call the vision service to analyze images
     const imageUrls = uploads
       .filter((u) => u.fileType.startsWith("image/"))
       .map((u) => u.fileUrl);
@@ -89,28 +88,8 @@ export async function POST(
       throw new Error("No image files found in uploads. Please upload at least one image.");
     }
 
-    // Call the Python vision service for room analysis
-    const visionServiceUrl = process.env.VISION_SERVICE_URL || "http://localhost:8000";
-
-    const analysisRes = await fetch(`${visionServiceUrl}/api/vision/analyze-property`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        image_urls: imageUrls,
-        property_name: property.name,
-        property_notes: property.notes,
-      }),
-    });
-
-    let analysis;
-
-    if (analysisRes.ok) {
-      analysis = await analysisRes.json();
-    } else {
-      // Fallback: use a simple AI analysis via the Next.js API route
-      // This calls Claude directly if the Python service is down
-      analysis = await analyzeWithFallback(imageUrls, property.name);
-    }
+    // Analyze images with Claude Vision API directly
+    const analysis = await analyzePropertyImages(imageUrls, property.name);
 
     // Create rooms and items from AI analysis
     const createdRooms = [];
@@ -236,8 +215,8 @@ export async function POST(
   }
 }
 
-// Fallback analysis when vision service is not available
-async function analyzeWithFallback(
+// Analyze property images with Claude Vision API
+async function analyzePropertyImages(
   imageUrls: string[],
   propertyName: string,
 ): Promise<{ rooms: any[] }> {

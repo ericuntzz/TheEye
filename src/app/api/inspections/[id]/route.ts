@@ -141,52 +141,15 @@ export async function POST(
   // Get room info
   const [room] = await db.select().from(rooms).where(eq(rooms.id, roomId));
 
-  // Call vision service for comparison
-  const visionServiceUrl =
-    process.env.VISION_SERVICE_URL || "http://localhost:8000";
-
-  let findings = [];
-  let score = 100;
-  let rawResponse = "";
-
-  try {
-    const compareRes = await fetch(`${visionServiceUrl}/api/vision/compare`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        baseline_url: baseline.imageUrl,
-        current_url: currentImageUrl,
-        room_name: room?.name,
-      }),
-    });
-
-    if (compareRes.ok) {
-      const result = await compareRes.json();
-      findings = result.findings || [];
-      score = result.readiness_score ?? 100;
-      rawResponse = result.raw_response || JSON.stringify(result);
-    } else {
-      // Fallback: call Anthropic directly
-      const fallbackResult = await compareFallback(
-        baseline.imageUrl,
-        currentImageUrl,
-        room?.name || "Unknown Room",
-      );
-      findings = fallbackResult.findings || [];
-      score = fallbackResult.readiness_score ?? 100;
-      rawResponse = JSON.stringify(fallbackResult);
-    }
-  } catch {
-    // Fallback
-    const fallbackResult = await compareFallback(
-      baseline.imageUrl,
-      currentImageUrl,
-      room?.name || "Unknown Room",
-    );
-    findings = fallbackResult.findings || [];
-    score = fallbackResult.readiness_score ?? 100;
-    rawResponse = JSON.stringify(fallbackResult);
-  }
+  // Compare images with Claude Vision API
+  const comparisonResult = await compareImages(
+    baseline.imageUrl,
+    currentImageUrl,
+    room?.name || "Unknown Room",
+  );
+  const findings = comparisonResult.findings || [];
+  const score = comparisonResult.readiness_score ?? 100;
+  const rawResponse = JSON.stringify(comparisonResult);
 
   const hasCritical = findings.some(
     (f: any) => f.severity === "critical" || f.severity === "high",
@@ -209,7 +172,7 @@ export async function POST(
   return NextResponse.json(result, { status: 201 });
 }
 
-async function compareFallback(
+async function compareImages(
   baselineUrl: string,
   currentUrl: string,
   roomName: string,
