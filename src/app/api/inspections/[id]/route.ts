@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { getDbUser } from "@/lib/auth";
 import { db } from "@/server/db";
 import {
-  users,
   inspections,
   inspectionResults,
   rooms,
@@ -10,22 +9,6 @@ import {
   properties,
 } from "@/server/schema";
 import { eq, and } from "drizzle-orm";
-
-async function getDbUser() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) return null;
-
-  const [dbUser] = await db
-    .select()
-    .from(users)
-    .where(eq(users.supabaseId, user.id));
-
-  return dbUser || null;
-}
 
 // GET /api/inspections/[id] - Get inspection details with rooms
 export async function GET(
@@ -115,7 +98,13 @@ export async function POST(
     );
   }
 
-  const body = await request.json();
+  let body: Record<string, unknown>;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
   const { roomId, baselineImageId, currentImageUrl } = body;
 
   if (!roomId || !baselineImageId || !currentImageUrl) {
@@ -125,11 +114,29 @@ export async function POST(
     );
   }
 
+  // Verify room belongs to the inspection's property
+  const [room] = await db
+    .select()
+    .from(rooms)
+    .where(
+      and(
+        eq(rooms.id, roomId as string),
+        eq(rooms.propertyId, inspection.propertyId),
+      ),
+    );
+
+  if (!room) {
+    return NextResponse.json(
+      { error: "Room not found for this property" },
+      { status: 404 },
+    );
+  }
+
   // Get baseline info
   const [baseline] = await db
     .select()
     .from(baselineImages)
-    .where(eq(baselineImages.id, baselineImageId));
+    .where(eq(baselineImages.id, baselineImageId as string));
 
   if (!baseline) {
     return NextResponse.json(
@@ -138,14 +145,11 @@ export async function POST(
     );
   }
 
-  // Get room info
-  const [room] = await db.select().from(rooms).where(eq(rooms.id, roomId));
-
   // Compare images with Claude Vision API
   const comparisonResult = await compareImages(
     baseline.imageUrl,
-    currentImageUrl,
-    room?.name || "Unknown Room",
+    currentImageUrl as string,
+    room.name,
   );
   const findings = comparisonResult.findings || [];
   const score = comparisonResult.readiness_score ?? 100;
@@ -159,10 +163,11 @@ export async function POST(
     .insert(inspectionResults)
     .values({
       inspectionId: id,
-      roomId,
-      baselineImageId,
-      currentImageUrl,
-      status: findings.length === 0 ? "passed" : hasCritical ? "flagged" : "passed",
+      roomId: roomId as string,
+      baselineImageId: baselineImageId as string,
+      currentImageUrl: currentImageUrl as string,
+      status:
+        findings.length === 0 ? "passed" : hasCritical ? "flagged" : "flagged",
       score,
       findings,
       rawResponse,
@@ -184,10 +189,30 @@ async function compareImages(
   }
 
   try {
-    // Fetch both images
+    // Fetch both images with error checking
+    const [baseRes, currRes] = await Promise.all([
+      fetch(baselineUrl),
+      fetch(currentUrl),
+    ]);
+
+    if (!baseRes.ok || !currRes.ok) {
+      return {
+        findings: [],
+        readiness_score: 100,
+        summary: "Failed to fetch images",
+      };
+    }
+
+    const baseContentType =
+      baseRes.headers.get("content-type")?.split(";")[0].trim() ||
+      "image/jpeg";
+    const currContentType =
+      currRes.headers.get("content-type")?.split(";")[0].trim() ||
+      "image/jpeg";
+
     const [baseImg, currImg] = await Promise.all([
-      fetch(baselineUrl).then((r) => r.arrayBuffer()),
-      fetch(currentUrl).then((r) => r.arrayBuffer()),
+      baseRes.arrayBuffer(),
+      currRes.arrayBuffer(),
     ]);
 
     const baseB64 = Buffer.from(baseImg).toString("base64");
@@ -215,7 +240,7 @@ async function compareImages(
                 type: "image",
                 source: {
                   type: "base64",
-                  media_type: "image/jpeg",
+                  media_type: baseContentType,
                   data: baseB64,
                 },
               },
@@ -227,7 +252,7 @@ async function compareImages(
                 type: "image",
                 source: {
                   type: "base64",
-                  media_type: "image/jpeg",
+                  media_type: currContentType,
                   data: currB64,
                 },
               },
@@ -255,11 +280,23 @@ If the room looks perfect, return empty findings and score 100.`,
     });
 
     if (!res.ok) {
-      return { findings: [], readiness_score: 100, summary: "Comparison unavailable" };
+      return {
+        findings: [],
+        readiness_score: 100,
+        summary: "Comparison unavailable",
+      };
     }
 
     const data = await res.json();
-    const rawText = data.content[0].text;
+    const rawText = data.content?.[0]?.text;
+
+    if (!rawText) {
+      return {
+        findings: [],
+        readiness_score: 100,
+        summary: "Empty AI response",
+      };
+    }
 
     try {
       return JSON.parse(rawText);
@@ -272,6 +309,10 @@ If the room looks perfect, return empty findings and score 100.`,
       return { findings: [], readiness_score: 100, summary: "Parse error" };
     }
   } catch {
-    return { findings: [], readiness_score: 100, summary: "Comparison failed" };
+    return {
+      findings: [],
+      readiness_score: 100,
+      summary: "Comparison failed",
+    };
   }
 }

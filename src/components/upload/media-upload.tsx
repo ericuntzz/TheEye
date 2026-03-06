@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Upload, X, Image, Video, Loader2, CheckCircle } from "lucide-react";
 
@@ -38,18 +38,34 @@ export function MediaUpload({
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Clean up object URLs on unmount
+  useEffect(() => {
+    return () => {
+      files.forEach((f) => {
+        if (f.preview) URL.revokeObjectURL(f.preview);
+      });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const addFiles = useCallback(
     (newFiles: FileList | File[]) => {
-      const fileArray = Array.from(newFiles).slice(0, maxFiles - files.length);
-      const newFileEntries: FileWithPreview[] = fileArray.map((file) => ({
-        file,
-        preview: file.type.startsWith("image/") ? URL.createObjectURL(file) : "",
-        status: "pending" as const,
-        progress: 0,
-      }));
-      setFiles((prev) => [...prev, ...newFileEntries]);
+      setFiles((prev) => {
+        const remaining = maxFiles - prev.length;
+        if (remaining <= 0) return prev;
+        const fileArray = Array.from(newFiles).slice(0, remaining);
+        const newFileEntries: FileWithPreview[] = fileArray.map((file) => ({
+          file,
+          preview: file.type.startsWith("image/")
+            ? URL.createObjectURL(file)
+            : "",
+          status: "pending" as const,
+          progress: 0,
+        }));
+        return [...prev, ...newFileEntries];
+      });
     },
-    [files.length, maxFiles],
+    [maxFiles],
   );
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -115,7 +131,12 @@ export function MediaUpload({
 
         setFiles((prev) => {
           const updated = [...prev];
-          updated[i] = { ...updated[i], status: "complete", progress: 100, result };
+          updated[i] = {
+            ...updated[i],
+            status: "complete",
+            progress: 100,
+            result,
+          };
           return updated;
         });
 
@@ -142,14 +163,31 @@ export function MediaUpload({
   const pendingCount = files.filter((f) => f.status === "pending").length;
   const completeCount = files.filter((f) => f.status === "complete").length;
 
+  function handleFileInputChange(e: React.ChangeEvent<HTMLInputElement>) {
+    if (e.target.files) {
+      addFiles(e.target.files);
+    }
+    // Reset so selecting the same file again triggers onChange
+    e.target.value = "";
+  }
+
   return (
     <div className="space-y-4">
       {/* Dropzone */}
       <div
+        role="button"
+        tabIndex={0}
+        aria-label="Upload files - click or drag and drop"
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         onClick={() => fileInputRef.current?.click()}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            fileInputRef.current?.click();
+          }
+        }}
         className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all ${
           isDragging
             ? "border-primary bg-primary/5 dropzone-active"
@@ -162,7 +200,7 @@ export function MediaUpload({
           accept={accept}
           multiple
           className="hidden"
-          onChange={(e) => e.target.files && addFiles(e.target.files)}
+          onChange={handleFileInputChange}
         />
         <div className="flex flex-col items-center gap-3">
           <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
@@ -249,6 +287,7 @@ export function MediaUpload({
                       e.stopPropagation();
                       removeFile(i);
                     }}
+                    aria-label={`Remove ${f.file.name}`}
                     className="absolute top-1 left-1 w-5 h-5 rounded-full bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                   >
                     <X className="h-3 w-3 text-white" />

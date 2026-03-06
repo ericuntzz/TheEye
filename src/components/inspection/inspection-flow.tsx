@@ -7,9 +7,6 @@ import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import {
   ArrowLeft,
@@ -17,11 +14,19 @@ import {
   CheckCircle,
   AlertTriangle,
   Loader2,
-  Upload,
-  ChevronRight,
   XCircle,
+  AlertCircle,
 } from "lucide-react";
 import Link from "next/link";
+
+const SCORE_THRESHOLDS = { good: 80, warning: 50 } as const;
+
+interface Finding {
+  category: string;
+  description: string;
+  severity: string;
+  confidence: number;
+}
 
 interface InspectionData {
   id: string;
@@ -48,15 +53,8 @@ interface InspectionData {
     roomId: string;
     status: string;
     score: number | null;
-    findings: any[];
+    findings: Finding[];
   }>;
-}
-
-interface Finding {
-  category: string;
-  description: string;
-  severity: string;
-  confidence: number;
 }
 
 export function InspectionFlow({
@@ -68,6 +66,7 @@ export function InspectionFlow({
 }) {
   const [inspection, setInspection] = useState<InspectionData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [comparing, setComparing] = useState(false);
@@ -75,15 +74,17 @@ export function InspectionFlow({
 
   const fetchInspection = useCallback(async () => {
     try {
+      setError(null);
       const res = await fetch(`/api/inspections/${inspectionId}`, {
         credentials: "include",
       });
-      if (res.ok) {
-        const data = await res.json();
-        setInspection(data);
+      if (!res.ok) {
+        throw new Error("Failed to load inspection");
       }
+      const data = await res.json();
+      setInspection(data);
     } catch (err) {
-      console.error("Failed to fetch inspection:", err);
+      setError(err instanceof Error ? err.message : "Failed to load inspection");
     } finally {
       setLoading(false);
     }
@@ -94,13 +95,14 @@ export function InspectionFlow({
   }, [fetchInspection]);
 
   async function handleCaptureRoom(roomId: string, baselineImageId: string) {
-    if (!fileInputRef.current) return;
+    if (!fileInputRef.current || !baselineImageId) return;
 
     setActiveRoomId(roomId);
 
-    // Store the IDs for after file selection
     fileInputRef.current.dataset.roomId = roomId;
     fileInputRef.current.dataset.baselineImageId = baselineImageId;
+    // Reset value so re-selecting the same file triggers onChange
+    fileInputRef.current.value = "";
     fileInputRef.current.click();
   }
 
@@ -108,10 +110,13 @@ export function InspectionFlow({
     const file = e.target.files?.[0];
     if (!file || !inspection) return;
 
-    const roomId = e.target.dataset.roomId!;
-    const baselineImageId = e.target.dataset.baselineImageId!;
+    const roomId = e.target.dataset.roomId;
+    const baselineImageId = e.target.dataset.baselineImageId;
+
+    if (!roomId || !baselineImageId) return;
 
     setUploading(true);
+    setError(null);
 
     try {
       // Upload the current image
@@ -149,13 +154,11 @@ export function InspectionFlow({
       // Refresh inspection data
       await fetchInspection();
     } catch (err) {
-      console.error("Inspection capture failed:", err);
+      setError(err instanceof Error ? err.message : "Capture failed. Please try again.");
     } finally {
       setUploading(false);
       setComparing(false);
       setActiveRoomId(null);
-      // Reset file input
-      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }
 
@@ -173,7 +176,14 @@ export function InspectionFlow({
     return (
       <AppLayout userEmail={user.email || ""}>
         <div className="p-6">
-          <p className="text-muted-foreground">Inspection not found.</p>
+          <p className="text-muted-foreground">
+            {error || "Inspection not found."}
+          </p>
+          <Link href="/dashboard">
+            <Button variant="ghost" className="mt-4 gap-2">
+              <ArrowLeft className="h-4 w-4" /> Back to Dashboard
+            </Button>
+          </Link>
         </div>
       </AppLayout>
     );
@@ -182,13 +192,22 @@ export function InspectionFlow({
   const completedRoomIds = new Set(inspection.results.map((r) => r.roomId));
   const totalRooms = inspection.rooms.length;
   const completedCount = completedRoomIds.size;
+
+  // Calculate score only from rooms that have been scored (exclude nulls)
+  const scoredResults = inspection.results.filter((r) => r.score != null);
   const overallScore =
-    inspection.results.length > 0
+    scoredResults.length > 0
       ? Math.round(
-          inspection.results.reduce((sum, r) => sum + (r.score || 0), 0) /
-            inspection.results.length,
+          scoredResults.reduce((sum, r) => sum + r.score!, 0) /
+            scoredResults.length,
         )
       : null;
+
+  function getScoreColor(score: number) {
+    if (score >= SCORE_THRESHOLDS.good) return "text-green-400";
+    if (score >= SCORE_THRESHOLDS.warning) return "text-yellow-400";
+    return "text-destructive";
+  }
 
   return (
     <AppLayout userEmail={user.email || ""}>
@@ -200,6 +219,7 @@ export function InspectionFlow({
           accept="image/*"
           capture="environment"
           className="hidden"
+          aria-label="Capture room photo"
           onChange={handleFileSelected}
         />
 
@@ -222,21 +242,23 @@ export function InspectionFlow({
           </div>
           {overallScore !== null && (
             <div className="text-right">
-              <div
-                className={`text-3xl font-bold ${
-                  overallScore >= 80
-                    ? "text-green-400"
-                    : overallScore >= 50
-                      ? "text-yellow-400"
-                      : "text-destructive"
-                }`}
-              >
+              <div className={`text-3xl font-bold ${getScoreColor(overallScore)}`}>
                 {overallScore}
               </div>
               <p className="text-xs text-muted-foreground">Readiness Score</p>
             </div>
           )}
         </div>
+
+        {/* Error banner */}
+        {error && (
+          <Card className="bg-destructive/5 border-destructive/20 mb-6">
+            <CardContent className="flex items-center gap-3 py-3">
+              <AlertCircle className="h-4 w-4 text-destructive shrink-0" />
+              <p className="text-sm text-foreground">{error}</p>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Progress bar */}
         <div className="mb-8">
@@ -269,6 +291,7 @@ export function InspectionFlow({
             );
             const isActive = activeRoomId === room.id;
             const isCompleted = !!result;
+            const hasBaseline = room.baselineImages.length > 0;
 
             return (
               <Card
@@ -330,21 +353,21 @@ export function InspectionFlow({
                           <Loader2 className="h-4 w-4 animate-spin" />
                           {uploading ? "Uploading..." : "Comparing..."}
                         </div>
-                      ) : isCompleted ? (
+                      ) : isCompleted && hasBaseline ? (
                         <Button
                           variant="ghost"
                           size="sm"
                           onClick={() =>
                             handleCaptureRoom(
                               room.id,
-                              room.baselineImages[0]?.id,
+                              room.baselineImages[0].id,
                             )
                           }
                           className="text-xs"
                         >
                           Recapture
                         </Button>
-                      ) : room.baselineImages.length > 0 ? (
+                      ) : hasBaseline ? (
                         <Button
                           size="sm"
                           onClick={() =>
@@ -371,7 +394,7 @@ export function InspectionFlow({
                     result.findings &&
                     result.findings.length > 0 && (
                       <div className="mt-3 pt-3 border-t border-border space-y-2">
-                        {(result.findings as Finding[]).map((finding, i) => (
+                        {result.findings.map((finding, i) => (
                           <div
                             key={i}
                             className="flex items-start gap-2 text-xs"
@@ -413,13 +436,7 @@ export function InspectionFlow({
                 <p className="text-sm text-muted-foreground">
                   All {totalRooms} rooms inspected. Overall readiness score:{" "}
                   <span
-                    className={`font-bold ${
-                      (overallScore ?? 0) >= 80
-                        ? "text-green-400"
-                        : (overallScore ?? 0) >= 50
-                          ? "text-yellow-400"
-                          : "text-destructive"
-                    }`}
+                    className={`font-bold ${getScoreColor(overallScore ?? 0)}`}
                   >
                     {overallScore}/100
                   </span>

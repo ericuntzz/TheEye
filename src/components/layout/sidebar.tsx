@@ -5,9 +5,7 @@ import Link from "next/link";
 import {
   Eye,
   Home,
-  Upload,
   ClipboardCheck,
-  Settings,
   LogOut,
   ChevronLeft,
   ChevronRight,
@@ -21,16 +19,15 @@ interface SidebarProps {
 
 const navItems = [
   { href: "/dashboard", label: "Properties", icon: Home },
-  { href: "/dashboard?tab=upload", label: "Add Data", icon: Upload },
   { href: "/dashboard?tab=inspections", label: "Inspections", icon: ClipboardCheck },
 ];
 
 export function Sidebar({ userEmail }: SidebarProps) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
-  const supabase = createClient();
 
   async function handleSignOut() {
+    const supabase = createClient();
     await supabase.auth.signOut();
     window.location.href = "/login";
   }
@@ -54,7 +51,10 @@ export function Sidebar({ userEmail }: SidebarProps) {
       {/* Navigation */}
       <nav className="flex-1 py-4 px-2 space-y-1">
         {navItems.map((item) => {
-          const isActive = pathname === item.href || pathname.startsWith(item.href.split("?")[0]);
+          const hrefPath = item.href.split("?")[0];
+          const isActive =
+            pathname === hrefPath ||
+            (hrefPath !== "/dashboard" && pathname.startsWith(hrefPath));
           const Icon = item.icon;
           return (
             <Link
@@ -77,6 +77,7 @@ export function Sidebar({ userEmail }: SidebarProps) {
       <div className="border-t border-sidebar-border py-3 px-2 space-y-1">
         <button
           onClick={() => setCollapsed(!collapsed)}
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-sidebar-foreground hover:bg-sidebar-accent/50 hover:text-foreground w-full transition-colors"
         >
           {collapsed ? (
@@ -89,6 +90,7 @@ export function Sidebar({ userEmail }: SidebarProps) {
 
         <button
           onClick={handleSignOut}
+          aria-label="Sign out"
           className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-sidebar-foreground hover:bg-sidebar-accent/50 hover:text-foreground w-full transition-colors"
         >
           <LogOut className="h-4 w-4 shrink-0" />

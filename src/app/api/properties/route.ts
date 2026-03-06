@@ -1,36 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { getDbUser } from "@/lib/auth";
 import { db } from "@/server/db";
-import { properties, users } from "@/server/schema";
+import { properties } from "@/server/schema";
 import { eq } from "drizzle-orm";
-
-async function getDbUser() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) return null;
-
-  const [dbUser] = await db
-    .select()
-    .from(users)
-    .where(eq(users.supabaseId, user.id));
-
-  if (!dbUser) {
-    // Auto-create user record
-    const [newUser] = await db
-      .insert(users)
-      .values({
-        supabaseId: user.id,
-        email: user.email!,
-      })
-      .returning();
-    return newUser;
-  }
-
-  return dbUser;
-}
 
 // GET /api/properties - List all properties for the current user
 export async function GET() {
@@ -54,23 +26,41 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const body = await request.json();
+  let body: Record<string, unknown>;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  if (!body.name || typeof body.name !== "string" || body.name.trim() === "") {
+    return NextResponse.json(
+      { error: "Property name is required" },
+      { status: 400 },
+    );
+  }
+
+  const parseIntSafe = (val: unknown): number | null => {
+    if (val == null || val === "") return null;
+    const n = parseInt(String(val), 10);
+    return Number.isNaN(n) ? null : n;
+  };
 
   const [property] = await db
     .insert(properties)
     .values({
       userId: dbUser.id,
-      name: body.name,
-      address: body.address || null,
-      city: body.city || null,
-      state: body.state || null,
-      zipCode: body.zipCode || null,
-      propertyType: body.propertyType || null,
-      bedrooms: body.bedrooms ? parseInt(body.bedrooms) : null,
-      bathrooms: body.bathrooms ? parseInt(body.bathrooms) : null,
-      squareFeet: body.squareFeet ? parseInt(body.squareFeet) : null,
-      estimatedValue: body.estimatedValue || null,
-      notes: body.notes || null,
+      name: String(body.name).trim(),
+      address: body.address ? String(body.address) : null,
+      city: body.city ? String(body.city) : null,
+      state: body.state ? String(body.state) : null,
+      zipCode: body.zipCode ? String(body.zipCode) : null,
+      propertyType: body.propertyType ? String(body.propertyType) : null,
+      bedrooms: parseIntSafe(body.bedrooms),
+      bathrooms: parseIntSafe(body.bathrooms),
+      squareFeet: parseIntSafe(body.squareFeet),
+      estimatedValue: body.estimatedValue ? String(body.estimatedValue) : null,
+      notes: body.notes ? String(body.notes) : null,
     })
     .returning();
 

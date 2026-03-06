@@ -149,7 +149,7 @@ export type InsertMediaUpload = typeof mediaUploads.$inferInsert;
 export const inspections = pgTable("inspections", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   propertyId: uuid("property_id")
-    .references(() => properties.id)
+    .references(() => properties.id, { onDelete: "cascade" })
     .notNull(),
   inspectorId: uuid("inspector_id")
     .references(() => users.id)
@@ -174,10 +174,10 @@ export const inspectionResults = pgTable("inspection_results", {
     .references(() => inspections.id, { onDelete: "cascade" })
     .notNull(),
   roomId: uuid("room_id")
-    .references(() => rooms.id)
+    .references(() => rooms.id, { onDelete: "cascade" })
     .notNull(),
   baselineImageId: uuid("baseline_image_id")
-    .references(() => baselineImages.id)
+    .references(() => baselineImages.id, { onDelete: "cascade" })
     .notNull(),
   currentImageUrl: text("current_image_url").notNull(),
   status: varchar("status").default("pending"), // pending, passed, flagged

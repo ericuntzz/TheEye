@@ -21,8 +21,8 @@ import {
   Eye,
   Upload,
   CheckCircle,
-  AlertTriangle,
   Package,
+  AlertCircle,
 } from "lucide-react";
 import Link from "next/link";
 import { TrainingMode } from "./training-mode";
@@ -69,7 +69,7 @@ interface BaselineImage {
   label: string | null;
 }
 
-type ViewMode = "overview" | "training" | "inspect";
+type ViewMode = "overview" | "training";
 
 export function PropertyDetail({
   propertyId,
@@ -81,6 +81,7 @@ export function PropertyDetail({
   const [property, setProperty] = useState<Property | null>(null);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("overview");
   const router = useRouter();
 
@@ -89,12 +90,11 @@ export function PropertyDetail({
       const res = await fetch(`/api/properties/${propertyId}`, {
         credentials: "include",
       });
-      if (res.ok) {
-        const data = await res.json();
-        setProperty(data);
-      }
+      if (!res.ok) throw new Error("Failed to load property");
+      const data = await res.json();
+      setProperty(data);
     } catch (err) {
-      console.error("Failed to fetch property:", err);
+      setError(err instanceof Error ? err.message : "Failed to load property");
     }
   }, [propertyId]);
 
@@ -107,8 +107,8 @@ export function PropertyDetail({
         const data = await res.json();
         setRooms(data);
       }
-    } catch (err) {
-      console.error("Failed to fetch rooms:", err);
+    } catch {
+      // Non-critical — rooms may not exist yet
     }
   }, [propertyId]);
 
@@ -123,6 +123,7 @@ export function PropertyDetail({
   }, [fetchProperty, fetchRooms]);
 
   async function handleStartInspection() {
+    setError(null);
     try {
       const res = await fetch("/api/inspections", {
         method: "POST",
@@ -130,12 +131,14 @@ export function PropertyDetail({
         body: JSON.stringify({ propertyId }),
         credentials: "include",
       });
-      if (res.ok) {
-        const inspection = await res.json();
-        router.push(`/inspection/${inspection.id}`);
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || "Failed to start inspection");
       }
+      const inspection = await res.json();
+      router.push(`/inspection/${inspection.id}`);
     } catch (err) {
-      console.error("Failed to start inspection:", err);
+      setError(err instanceof Error ? err.message : "Failed to start inspection");
     }
   }
 
@@ -153,7 +156,9 @@ export function PropertyDetail({
     return (
       <AppLayout userEmail={user.email || ""}>
         <div className="p-6">
-          <p className="text-muted-foreground">Property not found.</p>
+          <p className="text-muted-foreground">
+            {error || "Property not found."}
+          </p>
           <Link href="/dashboard">
             <Button variant="ghost" className="mt-4 gap-2">
               <ArrowLeft className="h-4 w-4" /> Back to Properties
@@ -220,6 +225,16 @@ export function PropertyDetail({
             </div>
           </div>
         </div>
+
+        {/* Error banner */}
+        {error && (
+          <Card className="bg-destructive/5 border-destructive/20 mb-6">
+            <CardContent className="flex items-center gap-3 py-3">
+              <AlertCircle className="h-4 w-4 text-destructive shrink-0" />
+              <p className="text-sm text-foreground">{error}</p>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Property info cards */}
         <div className="grid gap-4 sm:grid-cols-4 mb-8">
@@ -320,7 +335,6 @@ export function PropertyDetail({
                         {room.items.length} item{room.items.length !== 1 ? "s" : ""}
                       </span>
                     </div>
-                    {/* Item list */}
                     {room.items.length > 0 && (
                       <div className="mt-3 flex flex-wrap gap-1.5">
                         {room.items.slice(0, 5).map((item) => (

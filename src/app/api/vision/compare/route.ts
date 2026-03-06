@@ -19,18 +19,52 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  let body: Record<string, unknown>;
   try {
-    const body = await request.json();
-    const { baseline_image_url, current_image_url, room_name } = body;
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
 
-    // Fetch both images as base64
+  const { baseline_image_url, current_image_url, room_name } = body;
+
+  if (!baseline_image_url || !current_image_url) {
+    return NextResponse.json(
+      { error: "baseline_image_url and current_image_url are required" },
+      { status: 400 },
+    );
+  }
+
+  try {
+    // Fetch both images with error checking
+    const [baseRes, currRes] = await Promise.all([
+      fetch(baseline_image_url as string),
+      fetch(current_image_url as string),
+    ]);
+
+    if (!baseRes.ok || !currRes.ok) {
+      return NextResponse.json(
+        { error: "Failed to fetch one or both images" },
+        { status: 400 },
+      );
+    }
+
+    const baseContentType =
+      baseRes.headers.get("content-type")?.split(";")[0].trim() ||
+      "image/jpeg";
+    const currContentType =
+      currRes.headers.get("content-type")?.split(";")[0].trim() ||
+      "image/jpeg";
+
     const [baseImg, currImg] = await Promise.all([
-      fetch(baseline_image_url).then((r) => r.arrayBuffer()),
-      fetch(current_image_url).then((r) => r.arrayBuffer()),
+      baseRes.arrayBuffer(),
+      currRes.arrayBuffer(),
     ]);
 
     const baseB64 = Buffer.from(baseImg).toString("base64");
     const currB64 = Buffer.from(currImg).toString("base64");
+
+    const roomLabel = (room_name as string) || "the room";
 
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -48,25 +82,25 @@ export async function POST(request: NextRequest) {
             content: [
               {
                 type: "text",
-                text: `BASELINE IMAGE (how "${room_name || "the room"}" should look):`,
+                text: `BASELINE IMAGE (how "${roomLabel}" should look):`,
               },
               {
                 type: "image",
                 source: {
                   type: "base64",
-                  media_type: "image/jpeg",
+                  media_type: baseContentType,
                   data: baseB64,
                 },
               },
               {
                 type: "text",
-                text: `CURRENT IMAGE (how "${room_name || "the room"}" looks now):`,
+                text: `CURRENT IMAGE (how "${roomLabel}" looks now):`,
               },
               {
                 type: "image",
                 source: {
                   type: "base64",
-                  media_type: "image/jpeg",
+                  media_type: currContentType,
                   data: currB64,
                 },
               },
@@ -101,7 +135,13 @@ If the room looks perfect, return empty findings and score 100.`,
     }
 
     const data = await res.json();
-    const rawText = data.content[0].text;
+    const rawText = data.content?.[0]?.text;
+
+    if (!rawText) {
+      return NextResponse.json(
+        { findings: [], readiness_score: 100, summary: "Empty AI response" },
+      );
+    }
 
     let result;
     try {
@@ -112,7 +152,11 @@ If the room looks perfect, return empty findings and score 100.`,
       if (start !== -1 && end > start) {
         result = JSON.parse(rawText.substring(start, end));
       } else {
-        result = { findings: [], readiness_score: 100, summary: "Parse error" };
+        result = {
+          findings: [],
+          readiness_score: 100,
+          summary: "Parse error",
+        };
       }
     }
 

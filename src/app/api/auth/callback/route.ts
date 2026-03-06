@@ -6,11 +6,16 @@ export async function GET(request: Request) {
   const code = searchParams.get("code");
   const next = searchParams.get("next") ?? "/dashboard";
 
+  // Validate redirect target to prevent open redirect
+  const isValidRedirect =
+    next.startsWith("/") && !next.startsWith("//") && !next.includes(":");
+
   if (code) {
     const supabase = await createClient();
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
-      return NextResponse.redirect(`${origin}${next}`);
+      const redirectPath = isValidRedirect ? next : "/dashboard";
+      return NextResponse.redirect(`${origin}${redirectPath}`);
     }
   }
 

@@ -50,11 +50,13 @@ export function TrainingMode({
   const [uploadedFileIds, setUploadedFileIds] = useState<string[]>([]);
   const [result, setResult] = useState<TrainingResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   async function handleAnalyze() {
-    if (uploadedFileIds.length === 0) return;
+    if (uploadedFileIds.length === 0 || isAnalyzing) return;
 
     setStep("analyzing");
+    setIsAnalyzing(true);
     setError(null);
 
     try {
@@ -76,7 +78,15 @@ export function TrainingMode({
     } catch (err) {
       setError(err instanceof Error ? err.message : "Training failed");
       setStep("error");
+    } finally {
+      setIsAnalyzing(false);
     }
+  }
+
+  function handleRetry() {
+    setUploadedFileIds([]);
+    setError(null);
+    setStep("upload");
   }
 
   return (
@@ -145,7 +155,7 @@ export function TrainingMode({
                     Ready to analyze. The AI will identify rooms and items automatically.
                   </p>
                 </div>
-                <Button onClick={handleAnalyze} className="gap-2">
+                <Button onClick={handleAnalyze} disabled={isAnalyzing} className="gap-2">
                   <Zap className="h-4 w-4" />
                   Analyze & Train
                 </Button>
@@ -264,7 +274,7 @@ export function TrainingMode({
             <div className="flex gap-2">
               <Button
                 variant="outline"
-                onClick={() => setStep("upload")}
+                onClick={handleRetry}
                 size="sm"
               >
                 Try Again

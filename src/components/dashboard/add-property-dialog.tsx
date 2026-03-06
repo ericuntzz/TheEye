@@ -69,7 +69,10 @@ export function AddPropertyDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(isOpen) => {
+      if (isOpen) setError(null);
+      onOpenChange(isOpen);
+    }}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>Add Property</DialogTitle>

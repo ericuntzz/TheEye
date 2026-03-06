@@ -13,12 +13,13 @@ import {
 } from "@/components/ui/card";
 import {
   Home,
-  Camera,
   ClipboardCheck,
   Plus,
   MapPin,
   Zap,
   ArrowRight,
+  Upload,
+  AlertCircle,
 } from "lucide-react";
 import { AddPropertyDialog } from "./add-property-dialog";
 import Link from "next/link";
@@ -43,25 +44,42 @@ interface Property {
 export function DashboardContent({ user }: { user: User }) {
   const [properties, setProperties] = useState<Property[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [inspectionCount, setInspectionCount] = useState<number | null>(null);
 
   const fetchProperties = useCallback(async () => {
     try {
+      setError(null);
       const res = await fetch("/api/properties", { credentials: "include" });
-      if (res.ok) {
-        const data = await res.json();
-        setProperties(data);
+      if (!res.ok) {
+        throw new Error("Failed to load properties");
       }
+      const data = await res.json();
+      setProperties(data);
     } catch (err) {
-      console.error("Failed to fetch properties:", err);
+      setError(err instanceof Error ? err.message : "Failed to load properties");
     } finally {
       setLoading(false);
     }
   }, []);
 
+  const fetchInspections = useCallback(async () => {
+    try {
+      const res = await fetch("/api/inspections", { credentials: "include" });
+      if (res.ok) {
+        const data = await res.json();
+        setInspectionCount(data.length);
+      }
+    } catch {
+      // Non-critical, fail silently
+    }
+  }, []);
+
   useEffect(() => {
     fetchProperties();
-  }, [fetchProperties]);
+    fetchInspections();
+  }, [fetchProperties, fetchInspections]);
 
   function handlePropertyAdded() {
     fetchProperties();
@@ -120,11 +138,26 @@ export function DashboardContent({ user }: { user: User }) {
               <ClipboardCheck className="h-4 w-4 text-primary" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-foreground">--</div>
-              <p className="text-xs text-muted-foreground">Average readiness</p>
+              <div className="text-2xl font-bold text-foreground">
+                {inspectionCount ?? "--"}
+              </div>
+              <p className="text-xs text-muted-foreground">Total completed</p>
             </CardContent>
           </Card>
         </div>
+
+        {/* Error state */}
+        {error && (
+          <Card className="bg-destructive/5 border-destructive/20 mb-8">
+            <CardContent className="flex items-center gap-3 py-4">
+              <AlertCircle className="h-5 w-5 text-destructive shrink-0" />
+              <p className="text-sm text-foreground">{error}</p>
+              <Button variant="outline" size="sm" onClick={fetchProperties} className="ml-auto shrink-0">
+                Retry
+              </Button>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Property List */}
         {loading ? (
@@ -133,7 +166,7 @@ export function DashboardContent({ user }: { user: User }) {
               <p className="text-muted-foreground">Loading properties...</p>
             </CardContent>
           </Card>
-        ) : properties.length === 0 ? (
+        ) : properties.length === 0 && !error ? (
           <Card className="bg-card border-border">
             <CardContent className="flex flex-col items-center justify-center py-16">
               <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
@@ -234,26 +267,5 @@ function TrainingBadge({ status }: { status: string | null }) {
     <span className="text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground border border-border">
       Untrained
     </span>
-  );
-}
-
-function Upload(props: React.SVGProps<SVGSVGElement> & { className?: string }) {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      {...props}
-    >
-      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-      <polyline points="17 8 12 3 7 8" />
-      <line x1="12" x2="12" y1="3" y2="15" />
-    </svg>
   );
 }

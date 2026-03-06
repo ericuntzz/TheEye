@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,8 +15,7 @@ export function LoginForm() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-
-  const supabase = createClient();
+  const router = useRouter();
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -24,6 +24,7 @@ export function LoginForm() {
     setMessage(null);
 
     if (isSignUp) {
+      const supabase = createClient();
       const { error } = await supabase.auth.signUp({
         email,
         password,
@@ -37,6 +38,7 @@ export function LoginForm() {
         setMessage("Check your email for a confirmation link.");
       }
     } else {
+      const supabase = createClient();
       const { error } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -44,7 +46,7 @@ export function LoginForm() {
       if (error) {
         setError(error.message);
       } else {
-        window.location.href = "/dashboard";
+        router.push("/dashboard");
       }
     }
 

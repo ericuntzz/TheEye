@@ -1,24 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { getDbUser } from "@/lib/auth";
 import { db } from "@/server/db";
-import { properties, users } from "@/server/schema";
+import { properties } from "@/server/schema";
 import { eq, and } from "drizzle-orm";
-
-async function getDbUser() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) return null;
-
-  const [dbUser] = await db
-    .select()
-    .from(users)
-    .where(eq(users.supabaseId, user.id));
-
-  return dbUser || null;
-}
 
 // GET /api/properties/[id] - Get a single property
 export async function GET(
@@ -44,6 +28,22 @@ export async function GET(
   return NextResponse.json(property);
 }
 
+// Allowed fields for PATCH update (prevents mass assignment)
+const ALLOWED_UPDATE_FIELDS = new Set([
+  "name",
+  "address",
+  "city",
+  "state",
+  "zipCode",
+  "propertyType",
+  "bedrooms",
+  "bathrooms",
+  "squareFeet",
+  "estimatedValue",
+  "notes",
+  "coverImageUrl",
+]);
+
 // PATCH /api/properties/[id] - Update a property
 export async function PATCH(
   request: NextRequest,
@@ -55,14 +55,25 @@ export async function PATCH(
   }
 
   const { id } = await params;
-  const body = await request.json();
+
+  let body: Record<string, unknown>;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  // Only allow whitelisted fields
+  const updates: Record<string, unknown> = { updatedAt: new Date() };
+  for (const [key, value] of Object.entries(body)) {
+    if (ALLOWED_UPDATE_FIELDS.has(key)) {
+      updates[key] = value;
+    }
+  }
 
   const [property] = await db
     .update(properties)
-    .set({
-      ...body,
-      updatedAt: new Date(),
-    })
+    .set(updates)
     .where(and(eq(properties.id, id), eq(properties.userId, dbUser.id)))
     .returning();
 

@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { getDbUser } from "@/lib/auth";
 import { db } from "@/server/db";
 import {
-  users,
   properties,
   mediaUploads,
   rooms,
@@ -10,22 +9,6 @@ import {
   baselineImages,
 } from "@/server/schema";
 import { eq, and, inArray } from "drizzle-orm";
-
-async function getDbUser() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) return null;
-
-  const [dbUser] = await db
-    .select()
-    .from(users)
-    .where(eq(users.supabaseId, user.id));
-
-  return dbUser || null;
-}
 
 // POST /api/properties/[id]/train - Analyze uploaded media with AI
 export async function POST(
@@ -38,7 +21,7 @@ export async function POST(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Verify property
+  // Verify property ownership
   const [property] = await db
     .select()
     .from(properties)
@@ -48,29 +31,42 @@ export async function POST(
     return NextResponse.json({ error: "Property not found" }, { status: 404 });
   }
 
-  const body = await request.json();
+  let body: Record<string, unknown>;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
   const { mediaUploadIds } = body;
 
-  if (!mediaUploadIds || mediaUploadIds.length === 0) {
+  if (
+    !mediaUploadIds ||
+    !Array.isArray(mediaUploadIds) ||
+    mediaUploadIds.length === 0
+  ) {
     return NextResponse.json(
       { error: "No media uploads provided" },
       { status: 400 },
     );
   }
 
-  // Get uploaded media
+  // Get uploaded media (verified to belong to this property)
   const uploads = await db
     .select()
     .from(mediaUploads)
     .where(
       and(
-        inArray(mediaUploads.id, mediaUploadIds),
+        inArray(mediaUploads.id, mediaUploadIds as string[]),
         eq(mediaUploads.propertyId, id),
       ),
     );
 
   if (uploads.length === 0) {
-    return NextResponse.json({ error: "No valid uploads found" }, { status: 400 });
+    return NextResponse.json(
+      { error: "No valid uploads found" },
+      { status: 400 },
+    );
   }
 
   // Mark property as training
@@ -85,7 +81,9 @@ export async function POST(
       .map((u) => u.fileUrl);
 
     if (imageUrls.length === 0) {
-      throw new Error("No image files found in uploads. Please upload at least one image.");
+      throw new Error(
+        "No image files found in uploads. Please upload at least one image.",
+      );
     }
 
     // Analyze images with Claude Vision API directly
@@ -124,11 +122,14 @@ export async function POST(
               importance: itemData.importance || "normal",
             })
             .returning();
-          roomItems.push({ name: newItem.name, category: newItem.category || "" });
+          roomItems.push({
+            name: newItem.name,
+            category: newItem.category || "",
+          });
         }
       }
 
-      // Assign baseline images to this room (distribute images across rooms)
+      // Assign baseline images to this room
       const roomImageUrls = roomData.image_urls || roomData.imageUrls || [];
       let baselineCount = 0;
 
@@ -169,29 +170,21 @@ export async function POST(
       });
     }
 
-    // Set cover image if available
-    if (imageUrls.length > 0) {
-      await db
-        .update(properties)
-        .set({
-          trainingStatus: "trained",
-          trainingCompletedAt: new Date(),
-          coverImageUrl: imageUrls[0],
-          updatedAt: new Date(),
-        })
-        .where(eq(properties.id, id));
-    } else {
-      await db
-        .update(properties)
-        .set({
-          trainingStatus: "trained",
-          trainingCompletedAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(properties.id, id));
-    }
+    // Set cover image and mark as trained
+    await db
+      .update(properties)
+      .set({
+        trainingStatus: "trained",
+        trainingCompletedAt: new Date(),
+        coverImageUrl: imageUrls[0] || null,
+        updatedAt: new Date(),
+      })
+      .where(eq(properties.id, id));
 
-    const totalItems = createdRooms.reduce((sum, r) => sum + r.items.length, 0);
+    const totalItems = createdRooms.reduce(
+      (sum, r) => sum + r.items.length,
+      0,
+    );
 
     return NextResponse.json({
       rooms: createdRooms,
@@ -223,13 +216,11 @@ async function analyzePropertyImages(
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
 
   if (!anthropicKey) {
-    // If no API key, return a basic structure based on image count
-    return generateBasicStructure(imageUrls, propertyName);
+    return generateBasicStructure(imageUrls);
   }
 
   try {
-    // Fetch first few images as base64 for analysis
-    const imagesToAnalyze = imageUrls.slice(0, 10); // Limit to 10 images
+    const imagesToAnalyze = imageUrls.slice(0, 10);
     const imageContents = [];
 
     for (const url of imagesToAnalyze) {
@@ -255,7 +246,7 @@ async function analyzePropertyImages(
     }
 
     if (imageContents.length === 0) {
-      return generateBasicStructure(imageUrls, propertyName);
+      return generateBasicStructure(imageUrls);
     }
 
     const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -307,13 +298,16 @@ Analyze all images and group them by room. Be thorough — identify every signif
     });
 
     if (!res.ok) {
-      return generateBasicStructure(imageUrls, propertyName);
+      return generateBasicStructure(imageUrls);
     }
 
     const data = await res.json();
-    const rawText = data.content[0].text;
+    const rawText = data.content?.[0]?.text;
 
-    // Parse JSON from response
+    if (!rawText) {
+      return generateBasicStructure(imageUrls);
+    }
+
     try {
       return JSON.parse(rawText);
     } catch {
@@ -322,18 +316,14 @@ Analyze all images and group them by room. Be thorough — identify every signif
       if (start !== -1 && end > start) {
         return JSON.parse(rawText.substring(start, end));
       }
-      return generateBasicStructure(imageUrls, propertyName);
+      return generateBasicStructure(imageUrls);
     }
   } catch {
-    return generateBasicStructure(imageUrls, propertyName);
+    return generateBasicStructure(imageUrls);
   }
 }
 
-function generateBasicStructure(
-  imageUrls: string[],
-  _propertyName: string,
-): { rooms: any[] } {
-  // Create one room per image as a simple fallback
+function generateBasicStructure(imageUrls: string[]): { rooms: any[] } {
   const rooms = imageUrls.map((url, i) => ({
     name: `Room ${i + 1}`,
     room_type: "other",
