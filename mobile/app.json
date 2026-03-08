@@ -1,0 +1,59 @@
+{
+  "expo": {
+    "name": "Atria",
+    "slug": "atria-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0a0e17"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.atria.mobile",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Atria needs camera access for property inspections.",
+        "NSMotionUsageDescription": "Atria uses motion sensors to ensure stable image capture.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0a0e17",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "package": "com.atria.mobile",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ],
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-dev-client",
+      "expo-image",
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Atria needs camera access for property inspections."
+        }
+      ],
+      "expo-sensors"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "d1c870bf-a1b7-474b-afc3-09c822688462"
+      }
+    },
+    "owner": "euntzzz"
+  }
+}

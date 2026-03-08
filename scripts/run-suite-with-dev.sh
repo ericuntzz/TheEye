@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+MODE="${1:-integration}"
+PORT="${2:-3010}"
+BASE_URL="http://127.0.0.1:${PORT}"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+if [[ "${MODE}" != "integration" && "${MODE}" != "stress" && "${MODE}" != "health" ]]; then
+  echo "Usage: ./scripts/run-suite-with-dev.sh <integration|stress|health> [port]"
+  exit 1
+fi
+
+cd "${ROOT_DIR}"
+
+if command -v lsof >/dev/null 2>&1 && lsof -ti tcp:"${PORT}" >/dev/null 2>&1; then
+  echo "Port ${PORT} is already in use. Pick a free port."
+  exit 1
+fi
+
+LOG_FILE="/tmp/atria-suite-${MODE}-${PORT}.log"
+SERVER_PID=""
+
+cleanup() {
+  if [[ -n "${SERVER_PID}" ]] && kill -0 "${SERVER_PID}" >/dev/null 2>&1; then
+    kill "${SERVER_PID}" >/dev/null 2>&1 || true
+    wait "${SERVER_PID}" 2>/dev/null || true
+  fi
+}
+
+trap cleanup EXIT INT TERM
+
+# Keep gate checks deterministic by running against a temporary production server.
+if [[ ! -f ".next/BUILD_ID" ]]; then
+  npm run build >/tmp/atria-suite-build.log 2>&1
+fi
+
+PORT="${PORT}" npm run start >"${LOG_FILE}" 2>&1 &
+SERVER_PID=$!
+
+READY=0
+for _ in $(seq 1 60); do
+  if curl -fsS "${BASE_URL}/api/health" >/dev/null 2>&1; then
+    READY=1
+    break
+  fi
+  sleep 1
+done
+
+if [[ "${READY}" -ne 1 ]]; then
+  echo "Production server did not become healthy on ${BASE_URL}."
+  echo "Recent log output:"
+  tail -n 80 "${LOG_FILE}" || true
+  exit 1
+fi
+
+if [[ "${MODE}" == "health" ]]; then
+  curl -fsS "${BASE_URL}/api/health" >/dev/null
+  echo "Atria health endpoint is healthy at ${BASE_URL}."
+  exit 0
+fi
+
+TOKEN="$(python3 ./get-token.py)"
+
+if [[ "${MODE}" == "integration" ]]; then
+  BASE_URL="${BASE_URL}" ./test-api.sh "${TOKEN}"
+  exit $?
+fi
+
+BASE_URL="${BASE_URL}" ./test-stress.sh "${TOKEN}"

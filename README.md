@@ -1,4 +1,4 @@
-# The Eye
+# Atria
 
 AI-Powered Visual Intelligence for Luxury Property Management.
 

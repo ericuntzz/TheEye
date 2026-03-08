@@ -44,7 +44,7 @@ export function Sidebar({ userEmail }: SidebarProps) {
           <Eye className="h-5 w-5 text-primary" />
         </div>
         {!collapsed && (
-          <span className="text-foreground font-semibold text-base">The Eye</span>
+          <span className="text-foreground font-semibold text-base">Atria</span>
         )}
       </div>
 

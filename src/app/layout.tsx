@@ -3,9 +3,9 @@ import "@/styles/globals.css";
 import { Providers } from "@/components/providers";
 
 export const metadata: Metadata = {
-  title: "The Eye — AI Visual Intelligence",
+  title: "Atria — AI Property Intelligence",
   description:
-    "AI-powered visual intelligence for luxury property management. Transform any worker into someone who has the eye.",
+    "AI-powered property intelligence for luxury property management. The operating system for property trust.",
 };
 
 export default function RootLayout({
