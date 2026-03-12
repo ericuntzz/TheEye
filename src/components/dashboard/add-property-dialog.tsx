@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { ArrowRight } from "lucide-react";
 
 interface AddPropertyDialogProps {
@@ -149,6 +150,7 @@ export function AddPropertyDialog({
               id="address"
               name="address"
               placeholder="e.g. 123 Ocean Drive, Malibu"
+              maxLength={200}
               aria-invalid={!!addressError}
               aria-describedby={addressError ? "address-error" : undefined}
               className={addressError ? "border-destructive focus-visible:ring-destructive" : ""}
@@ -161,10 +163,12 @@ export function AddPropertyDialog({
 
           <div className="space-y-2">
             <Label htmlFor="notes">Notes</Label>
-            <Input
+            <Textarea
               id="notes"
               name="notes"
               placeholder="Any additional notes"
+              rows={3}
+              maxLength={500}
               aria-invalid={!!notesError}
               aria-describedby={notesError ? "notes-error" : undefined}
               className={notesError ? "border-destructive focus-visible:ring-destructive" : ""}

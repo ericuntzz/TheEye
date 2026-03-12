@@ -47,6 +47,11 @@ cd vision-service && pip install -r requirements.txt && cd ..
 # Push database schema
 npm run db:push
 
+# If db:push hangs on schema introspection in an existing database,
+# baseline migration history and use migrate instead
+npm run db:baseline
+npx drizzle-kit migrate --config drizzle.config.ts
+
 # Start web + Expo together
 npm run dev:full
 ```

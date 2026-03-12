@@ -508,6 +508,7 @@ export default function PropertiesScreen() {
               <Text style={styles.modalSubtitle}>
                 Give it a name, then set up baselines
               </Text>
+              <Text style={styles.modalLabel}>Property Name *</Text>
               <TextInput
                 style={[
                   styles.modalInput,
@@ -527,6 +528,8 @@ export default function PropertiesScreen() {
                 returnKeyType="done"
                 maxLength={120}
                 onSubmitEditing={handleCreateProperty}
+                accessibilityLabel="Property name"
+                accessibilityHint="Required. Enter a name for this property."
               />
               {newPropertyError ? (
                 <Text style={styles.modalErrorText}>{newPropertyError}</Text>
@@ -865,6 +868,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.muted,
     marginBottom: 20,
+  },
+  modalLabel: {
+    fontSize: 13,
+    color: colors.heading,
+    fontWeight: "600",
+    marginBottom: 8,
   },
   modalInput: {
     backgroundColor: colors.secondary,
