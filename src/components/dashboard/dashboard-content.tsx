@@ -35,7 +35,18 @@ import {
   Shield,
   ArrowUpDown,
   Filter,
+  Trash2,
+  Ban,
+  MoreHorizontal,
 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { AddPropertyDialog } from "./add-property-dialog";
 import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
@@ -173,6 +184,7 @@ export function DashboardContent({ user }: { user: User }) {
           inspections={inspections}
           properties={properties}
           loading={inspectionsLoading}
+          onRefresh={fetchInspections}
         />
       )}
 
@@ -349,16 +361,60 @@ function InspectionsTab({
   inspections,
   properties,
   loading,
+  onRefresh,
 }: {
   inspections: Inspection[];
   properties: Property[];
   loading: boolean;
+  onRefresh: () => void;
 }) {
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Inspection | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<Inspection | null>(null);
+
   // Create a map of property id → property for quick lookups
   const propertyMap = useMemo(
     () => new Map(properties.map((p) => [p.id, p])),
     [properties],
   );
+
+  async function handleCancel(inspectionId: string) {
+    setActionLoading(inspectionId);
+    try {
+      const res = await fetch(`/api/inspections/${inspectionId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "cancelled" }),
+        credentials: "include",
+      });
+      if (res.ok) {
+        onRefresh();
+      }
+    } catch {
+      // Fail silently, user can retry
+    } finally {
+      setActionLoading(null);
+      setCancelTarget(null);
+    }
+  }
+
+  async function handleDelete(inspectionId: string) {
+    setActionLoading(inspectionId);
+    try {
+      const res = await fetch(`/api/inspections/${inspectionId}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (res.ok) {
+        onRefresh();
+      }
+    } catch {
+      // Fail silently, user can retry
+    } finally {
+      setActionLoading(null);
+      setDeleteTarget(null);
+    }
+  }
 
   function getStatusConfig(status: string) {
     switch (status) {
@@ -366,6 +422,8 @@ function InspectionsTab({
         return { icon: CheckCircle2, label: "Completed", color: "text-green-600", bg: "bg-green-500/10 border-green-500/20" };
       case "in_progress":
         return { icon: Loader2, label: "In Progress", color: "text-primary", bg: "bg-primary/10 border-primary/20" };
+      case "cancelled":
+        return { icon: Ban, label: "Cancelled", color: "text-muted-foreground", bg: "bg-muted border-border" };
       case "failed":
         return { icon: XCircle, label: "Failed", color: "text-destructive", bg: "bg-destructive/10 border-destructive/20" };
       default:
@@ -462,10 +520,12 @@ function InspectionsTab({
             const property = propertyMap.get(inspection.propertyId);
             const statusConfig = getStatusConfig(inspection.status);
             const StatusIcon = statusConfig.icon;
+            const isLoading = actionLoading === inspection.id;
 
             return (
-              <Link key={inspection.id} href={`/inspection/${inspection.id}`}>
-                <div className="flex items-center gap-3.5 p-4 rounded-2xl bg-card border border-border hover:border-primary/50 transition-all cursor-pointer group">
+              <div key={inspection.id} className="flex items-center gap-3.5 p-4 rounded-2xl bg-card border border-border hover:border-primary/50 transition-all group">
+                {/* Clickable area — links to inspection detail */}
+                <Link href={`/inspection/${inspection.id}`} className="flex items-center gap-3.5 flex-1 min-w-0">
                   {/* Status icon */}
                   <div className={`h-10 w-10 rounded-xl flex items-center justify-center shrink-0 border ${statusConfig.bg}`}>
                     <StatusIcon className={`h-5 w-5 ${statusConfig.color} ${inspection.status === "in_progress" ? "animate-spin" : ""}`} />
@@ -477,7 +537,7 @@ function InspectionsTab({
                       <p className="text-sm font-semibold text-foreground truncate">
                         {property?.name || "Unknown Property"}
                       </p>
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full border whitespace-nowrap ${statusConfig.bg} ${statusConfig.color}`}>
+                      <span className={`inline-flex items-center text-[10px] leading-normal px-2 py-0.5 rounded-full border whitespace-nowrap ${statusConfig.bg} ${statusConfig.color}`}>
                         {statusConfig.label}
                       </span>
                     </div>
@@ -495,15 +555,85 @@ function InspectionsTab({
                       </span>
                     </div>
                   </div>
+                </Link>
 
-                  {/* Arrow */}
-                  <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-primary shrink-0 transition-colors" />
+                {/* Action buttons */}
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {inspection.status === "in_progress" && (
+                    <button
+                      onClick={(e) => { e.preventDefault(); setCancelTarget(inspection); }}
+                      disabled={isLoading}
+                      className="h-8 w-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+                      title="Cancel inspection"
+                    >
+                      <Ban className="h-4 w-4" />
+                    </button>
+                  )}
+                  <button
+                    onClick={(e) => { e.preventDefault(); setDeleteTarget(inspection); }}
+                    disabled={isLoading}
+                    className="h-8 w-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/5 transition-colors"
+                    title="Delete inspection"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                  <Link href={`/inspection/${inspection.id}`}>
+                    <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors" />
+                  </Link>
                 </div>
-              </Link>
+              </div>
             );
           })}
         </div>
       )}
+
+      {/* Cancel Confirmation Dialog */}
+      <Dialog open={!!cancelTarget} onOpenChange={(open) => !open && setCancelTarget(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Cancel Inspection</DialogTitle>
+            <DialogDescription>
+              This will mark the inspection as cancelled. You can start a new inspection from the property page.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCancelTarget(null)}>Keep Going</Button>
+            <Button
+              variant="destructive"
+              onClick={() => cancelTarget && handleCancel(cancelTarget.id)}
+              disabled={!!actionLoading}
+              className="gap-1.5"
+            >
+              <Ban className="h-4 w-4" />
+              {actionLoading ? "Cancelling..." : "Cancel Inspection"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete Inspection</DialogTitle>
+            <DialogDescription>
+              This will permanently delete this inspection and all its results. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteTarget(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              onClick={() => deleteTarget && handleDelete(deleteTarget.id)}
+              disabled={!!actionLoading}
+              className="gap-1.5"
+            >
+              <Trash2 className="h-4 w-4" />
+              {actionLoading ? "Deleting..." : "Delete Inspection"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -661,9 +791,13 @@ function MobilePropertyCard({ property }: { property: Property }) {
             <TrainingBadge status={property.trainingStatus} />
           </div>
           {(property.address || property.city) && (
-            <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5 truncate">
+            <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5 min-w-0">
               <MapPin className="h-3 w-3 shrink-0" />
-              {[property.city, property.state].filter(Boolean).join(", ")}
+              <span className="truncate">
+                {[property.address, property.city, property.state]
+                  .filter(Boolean)
+                  .join(", ")}
+              </span>
             </p>
           )}
           <div className="flex gap-2 text-[11px] text-muted-foreground mt-1">
@@ -716,7 +850,7 @@ function DesktopPropertyCard({ property }: { property: Property }) {
             <TrainingBadge status={property.trainingStatus} />
           </div>
           {(property.address || property.city) && (
-            <CardDescription className="flex items-center gap-1 text-muted-foreground truncate">
+            <CardDescription className="flex items-center gap-1 text-muted-foreground min-w-0">
               <MapPin className="h-3 w-3 shrink-0" />
               <span className="truncate">
                 {[property.address, property.city, property.state]
@@ -775,20 +909,20 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
 function TrainingBadge({ status }: { status: string | null }) {
   if (status === "trained") {
     return (
-      <span className="text-[10px] px-2 py-0.5 rounded-full bg-success/10 text-green-600 border border-green-500/20 whitespace-nowrap shrink-0">
+      <span className="inline-flex items-center text-[10px] leading-normal px-2 py-0.5 rounded-full bg-success/10 text-green-600 border border-green-500/20 whitespace-nowrap shrink-0">
         Trained
       </span>
     );
   }
   if (status === "training") {
     return (
-      <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 whitespace-nowrap shrink-0">
+      <span className="inline-flex items-center text-[10px] leading-normal px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 whitespace-nowrap shrink-0">
         Training
       </span>
     );
   }
   return (
-    <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground border border-border whitespace-nowrap shrink-0">
+    <span className="inline-flex items-center text-[10px] leading-normal px-2 py-0.5 rounded-full bg-muted text-muted-foreground border border-border whitespace-nowrap shrink-0">
       Untrained
     </span>
   );

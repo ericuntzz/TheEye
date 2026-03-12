@@ -28,6 +28,9 @@ export function AddPropertyDialog({
 }: AddPropertyDialogProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [nameError, setNameError] = useState<string | null>(null);
+  const [addressError, setAddressError] = useState<string | null>(null);
+  const [notesError, setNotesError] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const router = useRouter();
 
@@ -35,20 +38,52 @@ export function AddPropertyDialog({
   useEffect(() => {
     if (open) {
       setError(null);
+      setNameError(null);
+      setAddressError(null);
+      setNotesError(null);
       formRef.current?.reset();
     }
   }, [open]);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    setLoading(true);
     setError(null);
+    setNameError(null);
+    setAddressError(null);
+    setNotesError(null);
 
     const formData = new FormData(e.currentTarget);
+    const name = (formData.get("name") as string || "").trim();
+    const address = (formData.get("address") as string || "").trim();
+    const notes = (formData.get("notes") as string || "").trim();
+
+    if (!name) {
+      setNameError("Property name is required");
+      return;
+    }
+    if (name.length < 2) {
+      setNameError("Property name must be at least 2 characters");
+      return;
+    }
+    if (name.length > 120) {
+      setNameError("Property name must be 120 characters or fewer");
+      return;
+    }
+    if (address.length > 200) {
+      setAddressError("Address must be 200 characters or fewer");
+      return;
+    }
+    if (notes.length > 500) {
+      setNotesError("Notes must be 500 characters or fewer");
+      return;
+    }
+
+    setLoading(true);
+
     const data = {
-      name: formData.get("name") as string,
-      address: (formData.get("address") as string) || null,
-      notes: (formData.get("notes") as string) || null,
+      name,
+      address: address || null,
+      notes: notes || null,
     };
 
     try {
@@ -98,7 +133,14 @@ export function AddPropertyDialog({
               name="name"
               placeholder="e.g. Beach House, Mountain Cabin"
               required
+              aria-invalid={!!nameError}
+              aria-describedby={nameError ? "name-error" : undefined}
+              className={nameError ? "border-destructive focus-visible:ring-destructive" : ""}
+              onChange={() => nameError && setNameError(null)}
             />
+            {nameError && (
+              <p id="name-error" className="text-xs text-destructive mt-1">{nameError}</p>
+            )}
           </div>
 
           <div className="space-y-2">
@@ -107,7 +149,14 @@ export function AddPropertyDialog({
               id="address"
               name="address"
               placeholder="e.g. 123 Ocean Drive, Malibu"
+              aria-invalid={!!addressError}
+              aria-describedby={addressError ? "address-error" : undefined}
+              className={addressError ? "border-destructive focus-visible:ring-destructive" : ""}
+              onChange={() => addressError && setAddressError(null)}
             />
+            {addressError && (
+              <p id="address-error" className="text-xs text-destructive mt-1">{addressError}</p>
+            )}
           </div>
 
           <div className="space-y-2">
@@ -116,7 +165,14 @@ export function AddPropertyDialog({
               id="notes"
               name="notes"
               placeholder="Any additional notes"
+              aria-invalid={!!notesError}
+              aria-describedby={notesError ? "notes-error" : undefined}
+              className={notesError ? "border-destructive focus-visible:ring-destructive" : ""}
+              onChange={() => notesError && setNotesError(null)}
             />
+            {notesError && (
+              <p id="notes-error" className="text-xs text-destructive mt-1">{notesError}</p>
+            )}
           </div>
 
           {error && <p className="text-sm text-destructive">{error}</p>}

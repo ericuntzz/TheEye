@@ -275,11 +275,13 @@ export function PropertyDetail({
           </Link>
           <h1 className="text-xl font-semibold text-foreground">{property.name}</h1>
           {(property.address || property.city) && (
-            <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
-              <MapPin className="h-3 w-3" />
-              {[property.address, property.city, property.state]
-                .filter(Boolean)
-                .join(", ")}
+            <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1 min-w-0">
+              <MapPin className="h-3 w-3 shrink-0" />
+              <span className="truncate">
+                {[property.address, property.city, property.state]
+                  .filter(Boolean)
+                  .join(", ")}
+              </span>
             </p>
           )}
           {/* Mobile action buttons */}
@@ -441,7 +443,7 @@ export function PropertyDetail({
                 Train the AI on this property
               </p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Upload photos or video of each room in its ideal state.
+                Upload photos of each room in its ideal, guest-ready state. The AI learns what &quot;perfect&quot; looks like so it can detect changes during inspections.
               </p>
             </div>
             <Button onClick={() => setViewMode("training")} size="sm" className="gap-2 shrink-0 rounded-xl">

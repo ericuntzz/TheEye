@@ -49,6 +49,7 @@ export default function PropertiesScreen() {
   // Add Property modal
   const [showAddModal, setShowAddModal] = useState(false);
   const [newPropertyName, setNewPropertyName] = useState("");
+  const [newPropertyError, setNewPropertyError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
 
   // Selection mode
@@ -108,19 +109,33 @@ export default function PropertiesScreen() {
   const closeAddModal = useCallback(() => {
     setShowAddModal(false);
     setNewPropertyName("");
+    setNewPropertyError(null);
   }, []);
 
   // ── Add Property ──────────────────────────────────────────────
 
   const handleCreateProperty = async () => {
     const trimmed = newPropertyName.trim();
-    if (!trimmed) return;
+    if (!trimmed) {
+      setNewPropertyError("Property name is required.");
+      return;
+    }
+    if (trimmed.length < 2) {
+      setNewPropertyError("Property name must be at least 2 characters.");
+      return;
+    }
+    if (trimmed.length > 120) {
+      setNewPropertyError("Property name must be 120 characters or fewer.");
+      return;
+    }
 
     setCreating(true);
+    setNewPropertyError(null);
     try {
       const property = await createProperty({ name: trimmed });
       setShowAddModal(false);
       setNewPropertyName("");
+      setNewPropertyError(null);
       navigation.navigate("PropertyTraining", {
         propertyId: property.id,
         propertyName: property.name,
@@ -494,16 +509,28 @@ export default function PropertiesScreen() {
                 Give it a name, then set up baselines
               </Text>
               <TextInput
-                style={styles.modalInput}
+                style={[
+                  styles.modalInput,
+                  newPropertyError ? styles.modalInputError : null,
+                ]}
                 value={newPropertyName}
-                onChangeText={setNewPropertyName}
+                onChangeText={(value) => {
+                  setNewPropertyName(value);
+                  if (newPropertyError) {
+                    setNewPropertyError(null);
+                  }
+                }}
                 placeholder="e.g. Aspen Lodge"
                 placeholderTextColor={colors.slate700}
                 autoCapitalize="words"
                 autoFocus
                 returnKeyType="done"
+                maxLength={120}
                 onSubmitEditing={handleCreateProperty}
               />
+              {newPropertyError ? (
+                <Text style={styles.modalErrorText}>{newPropertyError}</Text>
+              ) : null}
               <View style={styles.modalActions}>
                 <TouchableOpacity
                   style={styles.modalCancelButton}
@@ -644,10 +671,12 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "flex-start",
     marginBottom: 12,
+    minWidth: 0,
   },
   cardTitleArea: {
     flex: 1,
     marginRight: 12,
+    minWidth: 0,
   },
   propertyName: {
     fontSize: 18,
@@ -659,6 +688,7 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: 13,
     marginTop: 3,
+    flexShrink: 1,
   },
 
   // Selection checkbox
@@ -847,6 +877,16 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "500",
     marginBottom: 20,
+  },
+  modalInputError: {
+    borderColor: colors.error,
+  },
+  modalErrorText: {
+    color: colors.error,
+    fontSize: 12,
+    fontWeight: "500",
+    marginTop: -12,
+    marginBottom: 12,
   },
   modalActions: {
     flexDirection: "row",

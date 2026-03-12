@@ -92,6 +92,118 @@ export async function GET(
   }
 }
 
+// PATCH /api/inspections/[id] - Update inspection status (cancel, complete)
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const { id } = await params;
+    if (!isValidUUID(id)) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+    const dbUser = await getDbUser();
+    if (!dbUser) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const [inspection] = await db
+      .select()
+      .from(inspections)
+      .where(
+        and(eq(inspections.id, id), eq(inspections.inspectorId, dbUser.id)),
+      );
+
+    if (!inspection) {
+      return NextResponse.json(
+        { error: "Inspection not found" },
+        { status: 404 },
+      );
+    }
+
+    let body: Record<string, unknown>;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    }
+
+    const { status } = body;
+    const allowedStatuses = ["completed", "cancelled"];
+    if (!status || typeof status !== "string" || !allowedStatuses.includes(status)) {
+      return NextResponse.json(
+        { error: `status must be one of: ${allowedStatuses.join(", ")}` },
+        { status: 400 },
+      );
+    }
+
+    const [updated] = await db
+      .update(inspections)
+      .set({
+        status,
+        completedAt: status === "completed" || status === "cancelled" ? new Date() : undefined,
+      })
+      .where(eq(inspections.id, id))
+      .returning();
+
+    return NextResponse.json(updated);
+  } catch (error) {
+    console.error("[inspections/[id]] PATCH error:", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 },
+    );
+  }
+}
+
+// DELETE /api/inspections/[id] - Delete an inspection and its results
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const { id } = await params;
+    if (!isValidUUID(id)) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+    const dbUser = await getDbUser();
+    if (!dbUser) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const [inspection] = await db
+      .select()
+      .from(inspections)
+      .where(
+        and(eq(inspections.id, id), eq(inspections.inspectorId, dbUser.id)),
+      );
+
+    if (!inspection) {
+      return NextResponse.json(
+        { error: "Inspection not found" },
+        { status: 404 },
+      );
+    }
+
+    // Delete results first (foreign key), then the inspection
+    await db
+      .delete(inspectionResults)
+      .where(eq(inspectionResults.inspectionId, id));
+
+    await db
+      .delete(inspections)
+      .where(eq(inspections.id, id));
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("[inspections/[id]] DELETE error:", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 },
+    );
+  }
+}
+
 // POST /api/inspections/[id] - Submit room comparison for inspection
 export async function POST(
   request: NextRequest,
