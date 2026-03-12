@@ -46,6 +46,9 @@ venv/
 *.egg-info/
 .eggs/
 
+# ONNX model files (too large for git, see docs/ONNX_MODEL_SETUP.md)
+*.onnx
+
 # IDE
 .idea/
 .vscode/

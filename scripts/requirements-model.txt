@@ -1,0 +1,13 @@
+# Python dependencies for exporting MobileCLIP-S0 to ONNX.
+# For CPU-only PyTorch (saves ~2GB download), install torch first:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+#
+# Then install the rest:
+#   pip install -r scripts/requirements-model.txt
+
+torch>=2.0.0
+open-clip-torch>=2.24.0
+onnx>=1.15.0
+onnxscript>=0.1.0
+onnxruntime>=1.17.0
+Pillow>=10.0.0

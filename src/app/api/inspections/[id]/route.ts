@@ -137,6 +137,14 @@ export async function PATCH(
       );
     }
 
+    // Only in_progress inspections can be completed or cancelled
+    if (inspection.status !== "in_progress") {
+      return NextResponse.json(
+        { error: `Cannot change status of a ${inspection.status} inspection` },
+        { status: 409 },
+      );
+    }
+
     const [updated] = await db
       .update(inspections)
       .set({

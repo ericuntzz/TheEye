@@ -37,7 +37,6 @@ import {
   Filter,
   Trash2,
   Ban,
-  MoreHorizontal,
 } from "lucide-react";
 import {
   Dialog,
@@ -369,6 +368,7 @@ function InspectionsTab({
   onRefresh: () => void;
 }) {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Inspection | null>(null);
   const [cancelTarget, setCancelTarget] = useState<Inspection | null>(null);
 
@@ -380,6 +380,7 @@ function InspectionsTab({
 
   async function handleCancel(inspectionId: string) {
     setActionLoading(inspectionId);
+    setActionError(null);
     try {
       const res = await fetch(`/api/inspections/${inspectionId}`, {
         method: "PATCH",
@@ -389,9 +390,12 @@ function InspectionsTab({
       });
       if (res.ok) {
         onRefresh();
+      } else {
+        const err = await res.json().catch(() => ({ error: "Failed to cancel inspection" }));
+        setActionError(err.error || "Failed to cancel inspection");
       }
     } catch {
-      // Fail silently, user can retry
+      setActionError("Network error. Please try again.");
     } finally {
       setActionLoading(null);
       setCancelTarget(null);
@@ -400,6 +404,7 @@ function InspectionsTab({
 
   async function handleDelete(inspectionId: string) {
     setActionLoading(inspectionId);
+    setActionError(null);
     try {
       const res = await fetch(`/api/inspections/${inspectionId}`, {
         method: "DELETE",
@@ -407,9 +412,12 @@ function InspectionsTab({
       });
       if (res.ok) {
         onRefresh();
+      } else {
+        const err = await res.json().catch(() => ({ error: "Failed to delete inspection" }));
+        setActionError(err.error || "Failed to delete inspection");
       }
     } catch {
-      // Fail silently, user can retry
+      setActionError("Network error. Please try again.");
     } finally {
       setActionLoading(null);
       setDeleteTarget(null);
@@ -516,6 +524,12 @@ function InspectionsTab({
         </div>
       ) : (
         <div className="space-y-3">
+          {actionError && (
+            <div className="flex items-center justify-between p-3 rounded-xl bg-destructive/10 border border-destructive/20 text-sm text-destructive">
+              <span>{actionError}</span>
+              <button onClick={() => setActionError(null)} className="ml-2 font-medium hover:underline">Dismiss</button>
+            </div>
+          )}
           {inspections.map((inspection) => {
             const property = propertyMap.get(inspection.propertyId);
             const statusConfig = getStatusConfig(inspection.status);

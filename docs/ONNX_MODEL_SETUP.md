@@ -38,21 +38,43 @@ python -c "from huggingface_hub import hf_hub_download; hf_hub_download('apple/M
 
 ## Step 2: Export to ONNX
 
+### Automated (Recommended)
+
+The export script handles downloading, exporting, validating, and placing the model:
+
+```bash
+pip install -r scripts/requirements-model.txt
+python scripts/export-mobileclip-onnx.py
+```
+
+This places the model at `src/lib/vision/models/mobileclip-s0.onnx` (and copies to `mobile/assets/models/` if the mobile directory exists).
+
+For CPU-only PyTorch (saves ~2GB download):
+```bash
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+pip install open-clip-torch onnx onnxruntime Pillow
+python scripts/export-mobileclip-onnx.py
+```
+
+### Manual Export (Alternative)
+
+> **Note:** MobileCLIP-S0 was removed from open_clip >=3.3. Use MobileCLIP2-S0 instead — same 512-dim output, same 256x256 input, fully compatible.
+
 ```python
 import torch
 import open_clip
 
-# Load the model
+# Load the model (MobileCLIP2-S0 replaces the original MobileCLIP-S0)
 model, preprocess_train, preprocess_val = open_clip.create_model_and_transforms(
-    'MobileCLIP-S0',
-    pretrained='datacomp'
+    'MobileCLIP2-S0',
+    pretrained='dfndr2b'
 )
 model.eval()
 
 # Export only the image encoder
 image_encoder = model.visual
 
-# Create dummy input (1, 3, 256, 256) — MobileCLIP-S0 uses 256x256 input
+# Create dummy input (1, 3, 256, 256) — MobileCLIP2-S0 uses 256x256 input
 dummy_input = torch.randn(1, 3, 256, 256)
 
 torch.onnx.export(

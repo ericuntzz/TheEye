@@ -125,6 +125,18 @@ export async function POST(
     );
   }
 
+  // Check embedding model BEFORE acquiring training lock to avoid stuck status
+  const hasRealModel = await hasRealEmbeddingModel();
+  if (!hasRealModel && !ALLOW_PLACEHOLDER_EMBEDDINGS) {
+    return NextResponse.json(
+      {
+        error:
+          "Embedding model is unavailable. Provision the MobileCLIP ONNX model first (see docs/ONNX_MODEL_SETUP.md) or set ALLOW_PLACEHOLDER_EMBEDDINGS=1 for local development only.",
+      },
+      { status: 503 },
+    );
+  }
+
   // Mark property as training — optimistic lock prevents concurrent runs
   const [trainingLock] = await db
     .update(properties)
@@ -157,17 +169,6 @@ export async function POST(
         videoUploadCount > 0
           ? "No photo/keyframe frames found. Videos were uploaded, but training needs image frames."
           : "No image files found in uploads. Please upload at least one image.",
-      );
-    }
-
-    const hasRealModel = await hasRealEmbeddingModel();
-    if (!hasRealModel && !ALLOW_PLACEHOLDER_EMBEDDINGS) {
-      return NextResponse.json(
-        {
-          error:
-            "Embedding model is unavailable. Provision the MobileCLIP ONNX model first (see docs/ONNX_MODEL_SETUP.md) or set ALLOW_PLACEHOLDER_EMBEDDINGS=1 for local development only.",
-        },
-        { status: 503 },
       );
     }
 
