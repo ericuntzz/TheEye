@@ -1,20 +1,11 @@
-import React from "react";
+import React, { useCallback, useRef } from "react";
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from "react-native";
-
-interface Finding {
-  id: string;
-  description: string;
-  severity: string;
-  confidence: number;
-  category: string;
-  status: string;
-}
+import type { Finding } from "../lib/inspection/types";
 
 interface Props {
   findings: Finding[];
   onConfirm: (id: string) => void;
   onDismiss: (id: string) => void;
-  onMute: (id: string) => void;
 }
 
 const SEVERITY_COLORS: Record<string, string> = {
@@ -37,8 +28,28 @@ export default function FindingsPanel({
   findings,
   onConfirm,
   onDismiss,
-  onMute,
 }: Props) {
+  // Guard against double-tap on confirm/dismiss
+  const processingRef = useRef<Set<string>>(new Set());
+
+  const handleConfirm = useCallback(
+    (id: string) => {
+      if (processingRef.current.has(id)) return;
+      processingRef.current.add(id);
+      onConfirm(id);
+    },
+    [onConfirm],
+  );
+
+  const handleDismiss = useCallback(
+    (id: string) => {
+      if (processingRef.current.has(id)) return;
+      processingRef.current.add(id);
+      onDismiss(id);
+    },
+    [onDismiss],
+  );
+
   if (findings.length === 0) return null;
 
   return (
@@ -69,14 +80,20 @@ export default function FindingsPanel({
                 {Math.round(finding.confidence * 100)}%
               </Text>
             </View>
-            <Text style={styles.findingDescription} numberOfLines={2}>
+            <Text
+              style={styles.findingDescription}
+              numberOfLines={2}
+              accessibilityRole="text"
+            >
               {finding.description}
             </Text>
             <View style={styles.actions}>
               <TouchableOpacity
                 style={[styles.actionButton, styles.confirmButton]}
-                onPress={() => onConfirm(finding.id)}
+                onPress={() => handleConfirm(finding.id)}
                 activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel={`Confirm finding: ${finding.description}`}
               >
                 <Text style={[styles.actionText, styles.confirmText]}>
                   Confirm
@@ -84,19 +101,14 @@ export default function FindingsPanel({
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.actionButton, styles.dismissButton]}
-                onPress={() => onDismiss(finding.id)}
+                onPress={() => handleDismiss(finding.id)}
                 activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel={`Dismiss finding: ${finding.description}`}
               >
                 <Text style={[styles.actionText, styles.dismissText]}>
                   Dismiss
                 </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.actionButton, styles.muteButton]}
-                onPress={() => onMute(finding.id)}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.actionText, styles.muteText]}>Mute</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -166,7 +178,7 @@ const styles = StyleSheet.create({
   },
   severityText: {
     fontSize: 12,
-    fontWeight: "700",
+    fontWeight: "600",
     letterSpacing: 0.3,
     textTransform: "uppercase",
   },
@@ -201,10 +213,6 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(239, 68, 68, 0.08)",
     borderColor: "rgba(239, 68, 68, 0.15)",
   },
-  muteButton: {
-    backgroundColor: "rgba(148, 163, 184, 0.06)",
-    borderColor: "rgba(148, 163, 184, 0.1)",
-  },
   actionText: {
     fontSize: 13,
     fontWeight: "600",
@@ -214,8 +222,5 @@ const styles = StyleSheet.create({
   },
   dismissText: {
     color: "#ef4444",
-  },
-  muteText: {
-    color: "#94a3b8",
   },
 });

@@ -28,6 +28,8 @@ export default function CoverageTracker({
 
   const scannedCount = roomWaypoints?.filter((w) => w.scanned).length ?? 0;
   const totalCount = roomWaypoints?.length ?? 0;
+  const roomCoverage =
+    totalCount > 0 ? Math.round((scannedCount / totalCount) * 100) : null;
 
   return (
     <View style={styles.container}>
@@ -45,9 +47,17 @@ export default function CoverageTracker({
           />
         </View>
         <Text style={[styles.percentText, { color: barColor }]}>
-          {Math.round(clampedCoverage)}%
+          Overall {Math.round(clampedCoverage)}%
         </Text>
       </View>
+
+      {totalCount > 0 && (
+        <Text style={styles.roomProgressText} numberOfLines={1} ellipsizeMode="tail">
+          {currentRoomName ? `${currentRoomName}: ` : ""}
+          {scannedCount}/{totalCount} angles
+          {roomCoverage !== null ? ` (${roomCoverage}%)` : ""}
+        </Text>
+      )}
 
       {/* Waypoint dots (when room has baselines) */}
       {roomWaypoints && roomWaypoints.length > 0 && (
@@ -108,10 +118,15 @@ const styles = StyleSheet.create({
     borderRadius: 3,
   },
   percentText: {
-    fontSize: 13,
-    fontWeight: "700",
-    minWidth: 32,
+    fontSize: 12,
+    fontWeight: "600",
+    minWidth: 86,
     textAlign: "right",
+  },
+  roomProgressText: {
+    color: "rgba(255,255,255,0.8)",
+    fontSize: 12,
+    fontWeight: "500",
   },
   waypointsRow: {
     flexDirection: "row",

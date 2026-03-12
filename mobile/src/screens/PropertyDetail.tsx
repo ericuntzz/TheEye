@@ -219,7 +219,7 @@ export default function PropertyDetailScreen() {
             onPress={handleBack}
             activeOpacity={0.7}
           >
-            <Text style={styles.backText}>{"<"} Back</Text>
+            <Text style={styles.backText}>{"\u2039"} Back</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[
@@ -231,7 +231,7 @@ export default function PropertyDetailScreen() {
             activeOpacity={0.7}
           >
             {saving ? (
-              <ActivityIndicator size="small" color="#000" />
+              <ActivityIndicator size="small" color={colors.foreground} />
             ) : (
               <Text
                 style={[
@@ -263,14 +263,14 @@ export default function PropertyDetailScreen() {
                 style={[
                   styles.statusDot,
                   {
-                    backgroundColor: isTrained ? "#22c55e" : colors.primary,
+                    backgroundColor: isTrained ? colors.success : colors.primary,
                   },
                 ]}
               />
               <Text
                 style={[
                   styles.statusText,
-                  { color: isTrained ? "#22c55e" : colors.primary },
+                  { color: isTrained ? colors.success : colors.primary },
                 ]}
               >
                 {isTrained ? "Trained" : "Untrained"}
@@ -281,6 +281,17 @@ export default function PropertyDetailScreen() {
           {error && (
             <View style={styles.errorContainer}>
               <Text style={styles.errorText}>{error}</Text>
+              <TouchableOpacity
+                onPress={() =>
+                  navigation.navigate("ReportIssue", {
+                    prefillError: error,
+                    prefillScreen: "PropertyDetail",
+                  })
+                }
+                style={{ marginTop: 8 }}
+              >
+                <Text style={styles.errorReportLink}>Report this issue</Text>
+              </TouchableOpacity>
             </View>
           )}
 
@@ -294,7 +305,7 @@ export default function PropertyDetailScreen() {
                 value={name}
                 onChangeText={updateField(setName)}
                 placeholder="e.g. Aspen Lodge"
-                placeholderTextColor="#334155"
+                placeholderTextColor={colors.slate700}
                 autoCapitalize="words"
               />
             </View>
@@ -342,7 +353,7 @@ export default function PropertyDetailScreen() {
                 value={notes}
                 onChangeText={updateField(setNotes)}
                 placeholder="Any notes about this property..."
-                placeholderTextColor="#334155"
+                placeholderTextColor={colors.slate700}
                 multiline
                 numberOfLines={3}
                 textAlignVertical="top"
@@ -360,7 +371,7 @@ export default function PropertyDetailScreen() {
                 value={address}
                 onChangeText={updateField(setAddress)}
                 placeholder="123 Main St"
-                placeholderTextColor="#334155"
+                placeholderTextColor={colors.slate700}
                 autoCapitalize="words"
               />
             </View>
@@ -373,7 +384,7 @@ export default function PropertyDetailScreen() {
                   value={city}
                   onChangeText={updateField(setCity)}
                   placeholder="Aspen"
-                  placeholderTextColor="#334155"
+                  placeholderTextColor={colors.slate700}
                   autoCapitalize="words"
                 />
               </View>
@@ -384,7 +395,7 @@ export default function PropertyDetailScreen() {
                   value={state}
                   onChangeText={updateField(setState)}
                   placeholder="CO"
-                  placeholderTextColor="#334155"
+                  placeholderTextColor={colors.slate700}
                   autoCapitalize="characters"
                   maxLength={2}
                 />
@@ -398,7 +409,7 @@ export default function PropertyDetailScreen() {
                 value={zipCode}
                 onChangeText={updateField(setZipCode)}
                 placeholder="81611"
-                placeholderTextColor="#334155"
+                placeholderTextColor={colors.slate700}
                 keyboardType="number-pad"
                 maxLength={10}
               />
@@ -416,7 +427,7 @@ export default function PropertyDetailScreen() {
                   value={bedrooms}
                   onChangeText={updateField(setBedrooms)}
                   placeholder="4"
-                  placeholderTextColor="#334155"
+                  placeholderTextColor={colors.slate700}
                   keyboardType="number-pad"
                   maxLength={3}
                 />
@@ -428,7 +439,7 @@ export default function PropertyDetailScreen() {
                   value={bathrooms}
                   onChangeText={updateField(setBathrooms)}
                   placeholder="3"
-                  placeholderTextColor="#334155"
+                  placeholderTextColor={colors.slate700}
                   keyboardType="number-pad"
                   maxLength={3}
                 />
@@ -443,7 +454,7 @@ export default function PropertyDetailScreen() {
                   value={squareFeet}
                   onChangeText={updateField(setSquareFeet)}
                   placeholder="3,500"
-                  placeholderTextColor="#334155"
+                  placeholderTextColor={colors.slate700}
                   keyboardType="number-pad"
                 />
               </View>
@@ -454,7 +465,7 @@ export default function PropertyDetailScreen() {
                   value={estimatedValue}
                   onChangeText={updateField(setEstimatedValue)}
                   placeholder="$3,500,000"
-                  placeholderTextColor="#334155"
+                  placeholderTextColor={colors.slate700}
                 />
               </View>
             </View>
@@ -463,6 +474,35 @@ export default function PropertyDetailScreen() {
           {/* Quick Actions */}
           <Text style={styles.sectionTitle}>Actions</Text>
           <View style={styles.section}>
+            <TouchableOpacity
+              style={styles.actionRow}
+              onPress={() =>
+                navigation.navigate("InspectionHistory", {
+                  propertyId,
+                  propertyName: name,
+                })
+              }
+              activeOpacity={0.7}
+            >
+              <View
+                style={[
+                  styles.actionIconCircle,
+                  { backgroundColor: "rgba(77, 166, 255, 0.12)" },
+                ]}
+              >
+                <Text style={[styles.actionIcon, { color: colors.primary }]}>
+                  {"i"}
+                </Text>
+              </View>
+              <View style={styles.actionContent}>
+                <Text style={styles.actionLabel}>Inspection Details</Text>
+                <Text style={styles.actionDesc}>
+                  View and manage inspection reports and notes
+                </Text>
+              </View>
+              <Text style={styles.actionChevron}>{">"}</Text>
+            </TouchableOpacity>
+
             {isTrained && (
               <TouchableOpacity
                 style={styles.actionRow}
@@ -500,7 +540,7 @@ export default function PropertyDetailScreen() {
                   { backgroundColor: "rgba(168, 85, 247, 0.1)" },
                 ]}
               >
-                <Text style={[styles.actionIcon, { color: "#a855f7" }]}>
+                <Text style={[styles.actionIcon, { color: colors.purple }]}>
                   {"~"}
                 </Text>
               </View>
@@ -519,7 +559,7 @@ export default function PropertyDetailScreen() {
           </View>
 
           {/* Danger Zone */}
-          <Text style={[styles.sectionTitle, { color: "#ef4444" }]}>
+          <Text style={[styles.sectionTitle, { color: colors.error }]}>
             Danger Zone
           </Text>
           <View style={[styles.section, styles.dangerSection]}>
@@ -530,7 +570,7 @@ export default function PropertyDetailScreen() {
               activeOpacity={0.7}
             >
               {deleting ? (
-                <ActivityIndicator size="small" color="#ef4444" />
+                <ActivityIndicator size="small" color={colors.error} />
               ) : (
                 <>
                   <Text style={styles.deleteButtonText}>Delete Property</Text>
@@ -653,9 +693,15 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   errorText: {
-    color: "#f87171",
+    color: colors.error,
     fontSize: 14,
     fontWeight: "500",
+  },
+  errorReportLink: {
+    color: colors.error,
+    fontSize: 13,
+    fontWeight: "600",
+    textDecorationLine: "underline" as const,
   },
 
   // Sections
@@ -753,7 +799,7 @@ const styles = StyleSheet.create({
   actionIcon: {
     fontSize: 18,
     fontWeight: "600",
-    color: "#22c55e",
+    color: colors.success,
   },
   actionContent: {
     flex: 1,
@@ -769,7 +815,7 @@ const styles = StyleSheet.create({
     color: colors.muted,
   },
   actionChevron: {
-    color: "#334155",
+    color: colors.slate700,
     fontSize: 16,
     fontWeight: "600",
   },
@@ -783,7 +829,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   deleteButtonText: {
-    color: "#ef4444",
+    color: colors.error,
     fontSize: 16,
     fontWeight: "600",
     marginBottom: 4,

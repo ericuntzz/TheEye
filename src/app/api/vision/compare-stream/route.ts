@@ -1,9 +1,10 @@
 import { NextRequest } from "next/server";
-import { getDbUser, isValidUUID } from "@/lib/auth";
+import { getDbUser, isValidUUID, isSafeUrl } from "@/lib/auth";
 import { compareImages, type InspectionMode } from "@/lib/vision/compare";
 import { db } from "@/server/db";
 import { inspectionResults, inspections } from "@/server/schema";
 import { eq, and } from "drizzle-orm";
+import { emitEventSafe } from "@/lib/events/emit";
 
 /**
  * POST /api/vision/compare-stream
@@ -89,6 +90,14 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Validate URL safety (prevent SSRF)
+  if (!isSafeUrl(baselineUrl)) {
+    return new Response(
+      JSON.stringify({ error: "Invalid baseline URL" }),
+      { status: 400, headers: { "Content-Type": "application/json" } },
+    );
+  }
+
   // Validate optional UUIDs if provided
   if (inspectionId && (typeof inspectionId !== "string" || !isValidUUID(inspectionId))) {
     return new Response(
@@ -110,6 +119,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Validate ownership if persisting results
+  let inspectionPropertyId: string | undefined;
   if (inspectionId) {
     const [inspection] = await db
       .select()
@@ -127,6 +137,8 @@ export async function POST(request: NextRequest) {
         { status: 404, headers: { "Content-Type": "application/json" } },
       );
     }
+
+    inspectionPropertyId = inspection.propertyId;
   }
 
   // Validate inspectionMode if provided
@@ -147,6 +159,28 @@ export async function POST(request: NextRequest) {
       );
 
       try {
+        const compareStartedAt = Date.now();
+
+        if (inspectionId && roomId && baselineImageId) {
+          await emitEventSafe({
+            eventType: "ComparisonSent",
+            aggregateId: inspectionId as string,
+            propertyId: inspectionPropertyId,
+            userId: dbUser.id,
+            payload: {
+              roomId: roomId as string,
+              baselineImageId: baselineImageId as string,
+              source: "mobile",
+              mode: images.length > 1 ? "burst" : "single",
+            },
+            metadata: {
+              source: "mobile",
+              inspectionMode: validatedMode,
+              action: "vision_compare_stream",
+            },
+          });
+        }
+
         // Run comparison
         const result = await compareImages({
           baselineImage: baselineUrl as string,
@@ -154,8 +188,37 @@ export async function POST(request: NextRequest) {
           roomName: roomName as string,
           inspectionMode: validatedMode,
           knownConditions: validatedConditions,
-          isBase64: true,
+          baselineIsBase64: false,
+          currentImagesAreBase64: true,
         });
+
+        if (inspectionId && roomId && baselineImageId) {
+          await emitEventSafe({
+            eventType: "ComparisonReceived",
+            aggregateId: inspectionId as string,
+            propertyId: inspectionPropertyId,
+            userId: dbUser.id,
+            payload: {
+              roomId: roomId as string,
+              baselineImageId: baselineImageId as string,
+              findingsCount: result.findings.length,
+              score: result.readiness_score ?? undefined,
+              latencyMs: Date.now() - compareStartedAt,
+              skippedByPreflight: result.diagnostics?.skippedByPreflight,
+              preflightReason: result.diagnostics?.preflight?.reason,
+              preflightSsim: result.diagnostics?.preflight?.ssim,
+              preflightDiffPercent:
+                result.diagnostics?.preflight?.diffPercent,
+              preflightAlignmentScore:
+                result.diagnostics?.preflight?.alignment.score,
+            },
+            metadata: {
+              source: "mobile",
+              inspectionMode: validatedMode,
+              action: "vision_compare_stream",
+            },
+          });
+        }
 
         // Send result event
         controller.enqueue(
@@ -167,12 +230,15 @@ export async function POST(request: NextRequest) {
         // Optionally persist to inspectionResults
         if (inspectionId && roomId && baselineImageId) {
           try {
+            const aiUnavailable = result.readiness_score === null;
             await db.insert(inspectionResults).values({
               inspectionId: inspectionId as string,
               roomId: roomId as string,
               baselineImageId: baselineImageId as string,
               currentImageUrl: "base64-capture",
-              status: result.findings.length === 0 ? "passed" : "flagged",
+              status: aiUnavailable
+                ? "flagged"
+                : (result.findings.length === 0 ? "passed" : "flagged"),
               score: result.readiness_score,
               findings: result.findings,
               rawResponse: JSON.stringify(result),
@@ -188,7 +254,8 @@ export async function POST(request: NextRequest) {
             `event: done\ndata: ${JSON.stringify({ status: "complete" })}\n\n`,
           ),
         );
-      } catch (error) {
+      } catch (streamErr) {
+        console.error("[compare-stream] Comparison failed:", streamErr);
         controller.enqueue(
           encoder.encode(
             `event: error\ndata: ${JSON.stringify({ error: "Comparison failed" })}\n\n`,

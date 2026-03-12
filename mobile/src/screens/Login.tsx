@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import { colors, radius, shadows } from '../lib/tokens';
+import { AtriaMark } from "../components/AtriaMark";
 
 export default function LoginScreen() {
   const [email, setEmail] = useState("");
@@ -41,12 +42,10 @@ export default function LoginScreen() {
       <View style={styles.inner}>
         {/* Logo Area */}
         <View style={styles.logoArea}>
-          <View style={styles.logoCircle}>
-            <View style={styles.logoInner}>
-              <View style={styles.logoPupil} />
-            </View>
+          <View style={styles.logoMark}>
+            <AtriaMark size={72} color="navy" />
           </View>
-          <Text style={styles.appName}>Atria</Text>
+          <Text style={styles.appName}>ATRIA</Text>
           <Text style={styles.tagline}>Property Intelligence Platform</Text>
         </View>
 
@@ -125,38 +124,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 48,
   },
-  logoCircle: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: "rgba(77, 166, 255, 0.12)",
-    borderWidth: 2,
-    borderColor: "rgba(77, 166, 255, 0.3)",
-    justifyContent: "center",
-    alignItems: "center",
+  logoMark: {
     marginBottom: 20,
   },
-  logoInner: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "rgba(77, 166, 255, 0.25)",
-    borderWidth: 2,
-    borderColor: colors.primary,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  logoPupil: {
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    backgroundColor: colors.primary,
-  },
   appName: {
-    fontSize: 32,
+    fontSize: 18,
     fontWeight: "600",
     color: colors.heading,
-    letterSpacing: -0.5,
+    letterSpacing: 5,
     marginBottom: 6,
   },
   tagline: {

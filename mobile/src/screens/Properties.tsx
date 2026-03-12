@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from "react";
+import React, { useState, useCallback, useRef, useEffect } from "react";
 import {
   View,
   Text,
@@ -7,13 +7,17 @@ import {
   StyleSheet,
   ActivityIndicator,
   RefreshControl,
-  Alert,
   Platform,
+  Modal,
+  TextInput,
+  Pressable,
+  KeyboardAvoidingView,
+  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation, useFocusEffect } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { getProperties } from "../lib/api";
+import { getProperties, createProperty, bulkDeleteProperties } from "../lib/api";
 import { supabase } from "../lib/supabase";
 import type { RootStackParamList } from "../navigation";
 import { colors, radius, shadows } from '../lib/tokens';
@@ -38,19 +42,37 @@ export default function PropertiesScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [userInitial, setUserInitial] = useState("U");
   const retryCountRef = useRef(0);
   const MAX_AUTO_RETRIES = 2;
+
+  // Add Property modal
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newPropertyName, setNewPropertyName] = useState("");
+  const [creating, setCreating] = useState(false);
+
+  // Selection mode
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user?.email) {
+        setUserInitial(session.user.email[0].toUpperCase());
+      }
+    });
+  }, []);
 
   const loadProperties = useCallback(async (isAutoRetry = false) => {
     try {
       setError(null);
       const data = await getProperties();
       setProperties(data);
-      retryCountRef.current = 0; // Reset on success
+      retryCountRef.current = 0;
     } catch (err) {
       console.error("Failed to load properties:", err);
 
-      // Auto-retry on first failure (handles race conditions with auth init)
       if (isAutoRetry || retryCountRef.current >= MAX_AUTO_RETRIES) {
         const retryHint =
           Platform.OS === "web"
@@ -59,9 +81,8 @@ export default function PropertiesScreen() {
         setError(`Failed to load properties. ${retryHint}`);
       } else {
         retryCountRef.current += 1;
-        // Short delay then auto-retry (covers auth init race conditions)
         setTimeout(() => loadProperties(true), 1500);
-        return; // Don't clear loading state yet
+        return;
       }
     } finally {
       setLoading(false);
@@ -69,7 +90,6 @@ export default function PropertiesScreen() {
     }
   }, []);
 
-  // Refresh every time screen is focused (e.g. after editing/deleting a property)
   useFocusEffect(
     useCallback(() => {
       loadProperties();
@@ -85,12 +105,106 @@ export default function PropertiesScreen() {
     (p) => p.trainingStatus === "trained",
   ).length;
 
+  const closeAddModal = useCallback(() => {
+    setShowAddModal(false);
+    setNewPropertyName("");
+  }, []);
+
+  // ── Add Property ──────────────────────────────────────────────
+
+  const handleCreateProperty = async () => {
+    const trimmed = newPropertyName.trim();
+    if (!trimmed) return;
+
+    setCreating(true);
+    try {
+      const property = await createProperty({ name: trimmed });
+      setShowAddModal(false);
+      setNewPropertyName("");
+      navigation.navigate("PropertyTraining", {
+        propertyId: property.id,
+        propertyName: property.name,
+      });
+    } catch (err) {
+      Alert.alert(
+        "Error",
+        err instanceof Error ? err.message : "Failed to create property",
+      );
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  // ── Selection Mode ────────────────────────────────────────────
+
+  const toggleSelectionMode = () => {
+    if (selectionMode) {
+      setSelectionMode(false);
+      setSelectedIds(new Set());
+    } else {
+      setSelectionMode(true);
+    }
+  };
+
+  const toggleSelection = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleBulkDelete = () => {
+    const count = selectedIds.size;
+    if (count === 0) return;
+
+    Alert.alert(
+      "Delete Properties",
+      `Are you sure you want to delete ${count} ${count === 1 ? "property" : "properties"}? This will permanently remove all associated data. This cannot be undone.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            setBulkDeleting(true);
+            try {
+              await bulkDeleteProperties(Array.from(selectedIds));
+              setSelectionMode(false);
+              setSelectedIds(new Set());
+              loadProperties();
+            } catch (err) {
+              Alert.alert(
+                "Error",
+                err instanceof Error ? err.message : "Failed to delete properties",
+              );
+            } finally {
+              setBulkDeleting(false);
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  // ── Render Property Card ──────────────────────────────────────
+
   const renderProperty = useCallback(({ item }: { item: Property }) => {
     const isTrained = item.trainingStatus === "trained";
+    const isSelected = selectionMode && selectedIds.has(item.id);
+
     return (
       <TouchableOpacity
-        style={styles.card}
+        style={[styles.card, isSelected && styles.cardSelected]}
         onPress={() => {
+          if (selectionMode) {
+            toggleSelection(item.id);
+            return;
+          }
           if (isTrained) {
             navigation.navigate("InspectionStart", { propertyId: item.id });
           } else {
@@ -101,19 +215,28 @@ export default function PropertiesScreen() {
           }
         }}
         onLongPress={() => {
+          if (selectionMode) return;
           navigation.navigate("PropertyDetail", { propertyId: item.id });
         }}
         activeOpacity={0.7}
         accessibilityRole="button"
-        accessibilityLabel={`${item.name}, ${isTrained ? "ready for inspection" : "tap to train"}. Long press to edit.`}
+        accessibilityLabel={`${item.name}, ${isTrained ? "ready for inspection" : "tap to train"}${selectionMode ? (isSelected ? ", selected" : ", not selected") : ". Long press to edit."}`}
       >
-        {/* Color accent bar */}
-        <View
-          style={[
-            styles.cardAccent,
-            { backgroundColor: isTrained ? colors.success : colors.primary },
-          ]}
-        />
+        {/* Selection checkbox OR color accent bar */}
+        {selectionMode ? (
+          <View style={[styles.checkboxArea, isSelected && styles.checkboxAreaSelected]}>
+            <View style={[styles.checkbox, isSelected && styles.checkboxChecked]}>
+              {isSelected && <Text style={styles.checkmark}>✓</Text>}
+            </View>
+          </View>
+        ) : (
+          <View
+            style={[
+              styles.cardAccent,
+              { backgroundColor: isTrained ? colors.success : colors.primary },
+            ]}
+          />
+        )}
 
         <View style={styles.cardContent}>
           <View style={styles.cardHeader}>
@@ -129,19 +252,21 @@ export default function PropertiesScreen() {
                 </Text>
               )}
             </View>
-            {/* Edit button */}
-            <TouchableOpacity
-              style={styles.editButton}
-              onPress={() =>
-                navigation.navigate("PropertyDetail", {
-                  propertyId: item.id,
-                })
-              }
-              activeOpacity={0.7}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Text style={styles.editButtonText}>Edit</Text>
-            </TouchableOpacity>
+            {/* Edit button — hidden in selection mode */}
+            {!selectionMode && (
+              <TouchableOpacity
+                style={styles.editButton}
+                onPress={() =>
+                  navigation.navigate("PropertyDetail", {
+                    propertyId: item.id,
+                  })
+                }
+                activeOpacity={0.7}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text style={styles.editButtonText}>Edit</Text>
+              </TouchableOpacity>
+            )}
           </View>
 
           {/* Property details row */}
@@ -188,7 +313,7 @@ export default function PropertiesScreen() {
         </View>
       </TouchableOpacity>
     );
-  }, [navigation]);
+  }, [navigation, selectionMode, selectedIds, toggleSelection]);
 
   if (loading) {
     return (
@@ -207,35 +332,51 @@ export default function PropertiesScreen() {
           <Text style={styles.title}>Properties</Text>
           <Text style={styles.subtitle}>
             {properties.length > 0
-              ? `${trainedCount} of ${properties.length} ready`
+              ? selectionMode
+                ? `${selectedIds.size} selected`
+                : `${trainedCount} of ${properties.length} ready`
               : "No properties yet"}
           </Text>
         </View>
-        <TouchableOpacity
-          onPress={() => {
-            Alert.alert("Sign Out", "Are you sure you want to sign out?", [
-              { text: "Cancel", style: "cancel" },
-              {
-                text: "Sign Out",
-                style: "destructive",
-                onPress: () => supabase.auth.signOut(),
-              },
-            ]);
-          }}
-          style={styles.signOut}
-          activeOpacity={0.7}
-          accessibilityRole="button"
-          accessibilityLabel="Sign out"
-        >
-          <Text style={styles.signOutText}>Sign Out</Text>
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          {properties.length > 0 && (
+            <TouchableOpacity
+              onPress={toggleSelectionMode}
+              style={styles.selectButton}
+              activeOpacity={0.7}
+            >
+              <Text
+                style={[
+                  styles.selectButtonText,
+                  selectionMode && styles.selectButtonTextActive,
+                ]}
+              >
+                {selectionMode ? "Cancel" : "Select"}
+              </Text>
+            </TouchableOpacity>
+          )}
+          {!selectionMode && (
+            <TouchableOpacity
+              onPress={() => navigation.navigate("Profile")}
+              style={styles.profileAvatar}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel="Open profile"
+            >
+              <Text style={styles.profileAvatarText}>{userInitial}</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
       <FlatList
         data={properties}
         keyExtractor={(item) => item.id}
         renderItem={renderProperty}
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[
+          styles.list,
+          selectionMode && selectedIds.size > 0 && { paddingBottom: 110 },
+        ]}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -246,40 +387,150 @@ export default function PropertiesScreen() {
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             {error ? (
-              <TouchableOpacity
-                style={styles.emptyRetryArea}
-                onPress={() => {
-                  setLoading(true);
-                  retryCountRef.current = 0;
-                  loadProperties();
-                }}
-                activeOpacity={0.7}
-                accessibilityRole="button"
-                accessibilityLabel="Retry loading properties"
-              >
-                <View style={styles.emptyIcon}>
-                  <Text style={styles.emptyIconRetryText}>↻</Text>
-                </View>
-                <Text style={styles.emptyTitle}>{error}</Text>
-                <View style={styles.retryButton}>
-                  <Text style={styles.retryButtonText}>Retry</Text>
-                </View>
-              </TouchableOpacity>
+              <View style={styles.emptyRetryArea}>
+                <TouchableOpacity
+                  onPress={() => {
+                    setLoading(true);
+                    retryCountRef.current = 0;
+                    loadProperties();
+                  }}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel="Retry loading properties"
+                  style={{ alignItems: "center" }}
+                >
+                  <View style={styles.emptyIcon}>
+                    <Text style={styles.emptyIconRetryText}>↻</Text>
+                  </View>
+                  <Text style={styles.emptyTitle}>{error}</Text>
+                  <View style={styles.retryButton}>
+                    <Text style={styles.retryButtonText}>Retry</Text>
+                  </View>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() =>
+                    navigation.navigate("ReportIssue", {
+                      prefillError: error,
+                      prefillScreen: "Properties",
+                    })
+                  }
+                  style={{ marginTop: 12 }}
+                >
+                  <Text style={styles.reportLink}>Report this issue</Text>
+                </TouchableOpacity>
+              </View>
             ) : (
-              <>
+              <TouchableOpacity
+                onPress={() => setShowAddModal(true)}
+                activeOpacity={0.7}
+                style={{ alignItems: "center" }}
+              >
                 <View style={styles.emptyIcon}>
                   <Text style={styles.emptyIconText}>+</Text>
                 </View>
                 <Text style={styles.emptyTitle}>No properties yet</Text>
                 <Text style={styles.emptySubtext}>
-                  Add properties from the web dashboard to get started
+                  Tap here to add your first property
                 </Text>
-              </>
+              </TouchableOpacity>
             )}
           </View>
         }
         showsVerticalScrollIndicator={false}
       />
+
+      {/* Floating Action Button */}
+      {!selectionMode && properties.length > 0 && (
+        <TouchableOpacity
+          style={styles.fab}
+          onPress={() => setShowAddModal(true)}
+          activeOpacity={0.8}
+          accessibilityRole="button"
+          accessibilityLabel="Add new property"
+        >
+          <Text style={styles.fabIcon}>+</Text>
+        </TouchableOpacity>
+      )}
+
+      {/* Selection mode bottom bar */}
+      {selectionMode && selectedIds.size > 0 && (
+        <View style={styles.selectionBar}>
+          <Text style={styles.selectionBarText}>
+            {selectedIds.size} {selectedIds.size === 1 ? "property" : "properties"}
+          </Text>
+          <TouchableOpacity
+            style={styles.selectionDeleteButton}
+            onPress={handleBulkDelete}
+            disabled={bulkDeleting}
+            activeOpacity={0.7}
+          >
+            {bulkDeleting ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Text style={styles.selectionDeleteText}>Delete</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Add Property Modal */}
+      <Modal
+        visible={showAddModal}
+        transparent
+        animationType="fade"
+        onRequestClose={closeAddModal}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+          <Pressable
+            style={styles.modalBackdrop}
+            onPress={closeAddModal}
+          />
+          <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>New Property</Text>
+              <Text style={styles.modalSubtitle}>
+                Give it a name, then set up baselines
+              </Text>
+              <TextInput
+                style={styles.modalInput}
+                value={newPropertyName}
+                onChangeText={setNewPropertyName}
+                placeholder="e.g. Aspen Lodge"
+                placeholderTextColor={colors.slate700}
+                autoCapitalize="words"
+                autoFocus
+                returnKeyType="done"
+                onSubmitEditing={handleCreateProperty}
+              />
+              <View style={styles.modalActions}>
+                <TouchableOpacity
+                  style={styles.modalCancelButton}
+                  onPress={closeAddModal}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.modalCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.modalCreateButton,
+                    (!newPropertyName.trim() || creating) && styles.modalCreateButtonDisabled,
+                  ]}
+                  onPress={handleCreateProperty}
+                  disabled={!newPropertyName.trim() || creating}
+                  activeOpacity={0.7}
+                >
+                  {creating ? (
+                    <ActivityIndicator size="small" color={colors.primaryForeground} />
+                  ) : (
+                    <Text style={styles.modalCreateText}>Create & Train</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -322,25 +573,47 @@ const styles = StyleSheet.create({
     marginTop: 2,
     fontWeight: "500",
   },
-  signOut: {
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginTop: 4,
+  },
+  selectButton: {
     paddingHorizontal: 14,
     paddingVertical: 8,
-    borderRadius: radius.md,
+    borderRadius: radius.sm,
     backgroundColor: colors.secondary,
     borderWidth: 1,
     borderColor: colors.cardBorder,
-    marginTop: 4,
   },
-  signOutText: {
+  selectButtonText: {
     color: colors.muted,
-    fontSize: 13,
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  selectButtonTextActive: {
+    color: colors.primary,
+  },
+  profileAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.heading,
+    justifyContent: "center",
+    alignItems: "center",
+    ...shadows.card,
+  },
+  profileAvatarText: {
+    color: "#fff",
+    fontSize: 15,
     fontWeight: "600",
   },
 
   // List
   list: {
     paddingHorizontal: 20,
-    paddingBottom: 40,
+    paddingBottom: 100,
     gap: 12,
   },
 
@@ -353,6 +626,10 @@ const styles = StyleSheet.create({
     borderColor: colors.stone,
     flexDirection: "row",
     ...shadows.card,
+  },
+  cardSelected: {
+    borderColor: colors.primary,
+    backgroundColor: "rgba(77, 166, 255, 0.04)",
   },
   cardAccent: {
     width: 4,
@@ -382,6 +659,34 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: 13,
     marginTop: 3,
+  },
+
+  // Selection checkbox
+  checkboxArea: {
+    width: 48,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  checkboxAreaSelected: {
+    backgroundColor: "rgba(77, 166, 255, 0.08)",
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: colors.stone,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  checkboxChecked: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  checkmark: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "700",
   },
 
   // Edit button
@@ -445,6 +750,138 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
 
+  // FAB
+  fab: {
+    position: "absolute",
+    bottom: 32,
+    right: 20,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.primary,
+    justifyContent: "center",
+    alignItems: "center",
+    ...shadows.elevated,
+  },
+  fabIcon: {
+    color: colors.primaryForeground,
+    fontSize: 28,
+    fontWeight: "400",
+    marginTop: -2,
+  },
+
+  // Selection bottom bar
+  selectionBar: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    paddingBottom: 34,
+    backgroundColor: colors.card,
+    borderTopWidth: 1,
+    borderTopColor: colors.stone,
+    ...shadows.elevated,
+  },
+  selectionBarText: {
+    color: colors.heading,
+    fontSize: 15,
+    fontWeight: "600",
+  },
+  selectionDeleteButton: {
+    backgroundColor: colors.error,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: radius.md,
+    minWidth: 80,
+    alignItems: "center",
+  },
+  selectionDeleteText: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "600",
+  },
+
+  // Modal
+  modalOverlay: {
+    flex: 1,
+    justifyContent: "center",
+    paddingHorizontal: 24,
+  },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+  },
+  modalContent: {
+    backgroundColor: colors.card,
+    borderRadius: radius.xl,
+    padding: 24,
+    width: "100%",
+    maxWidth: 400,
+    ...shadows.elevated,
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: "600",
+    color: colors.heading,
+    letterSpacing: -0.3,
+    marginBottom: 4,
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: colors.muted,
+    marginBottom: 20,
+  },
+  modalInput: {
+    backgroundColor: colors.secondary,
+    borderWidth: 1,
+    borderColor: colors.stone,
+    borderRadius: radius.lg,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    color: colors.foreground,
+    fontSize: 16,
+    fontWeight: "500",
+    marginBottom: 20,
+  },
+  modalActions: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  modalCancelButton: {
+    flex: 1,
+    paddingVertical: 13,
+    borderRadius: radius.md,
+    backgroundColor: colors.secondary,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    alignItems: "center",
+  },
+  modalCancelText: {
+    color: colors.muted,
+    fontSize: 15,
+    fontWeight: "600",
+  },
+  modalCreateButton: {
+    flex: 1,
+    paddingVertical: 13,
+    borderRadius: radius.md,
+    backgroundColor: colors.primary,
+    alignItems: "center",
+  },
+  modalCreateButtonDisabled: {
+    opacity: 0.4,
+  },
+  modalCreateText: {
+    color: colors.primaryForeground,
+    fontSize: 15,
+    fontWeight: "600",
+  },
+
   // Empty
   emptyContainer: {
     justifyContent: "center",
@@ -467,7 +904,7 @@ const styles = StyleSheet.create({
   emptyIconText: {
     fontSize: 28,
     color: colors.primary,
-    fontWeight: "300",
+    fontWeight: "400",
   },
   emptyRetryArea: {
     justifyContent: "center",
@@ -504,5 +941,11 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontSize: 15,
     fontWeight: "600",
+  },
+  reportLink: {
+    color: colors.muted,
+    fontSize: 13,
+    fontWeight: "500",
+    textDecorationLine: "underline" as const,
   },
 });

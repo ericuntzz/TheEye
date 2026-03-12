@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --turbopack -p ${PORT:-3000}",
+    "dev": "next dev -p ${PORT:-3000}",
     "build": "next build",
     "start": "next start -p ${PORT:-3000}",
     "lint": "eslint src/ server/",
@@ -16,7 +16,13 @@
     "mc:event:support": "node scripts/emit-mission-event.mjs support_ticket \"Atria support escalation\" \"Support ticket escalated from Atria\" medium",
     "gate:integration": "./scripts/run-suite-with-dev.sh integration 3010",
     "gate:stress": "./scripts/run-suite-with-dev.sh stress 3011",
-    "gate:health": "./scripts/run-suite-with-dev.sh health 3012"
+    "gate:health": "./scripts/run-suite-with-dev.sh health 3012",
+    "dev:full": "concurrently -n api,expo -c blue,magenta \"npm run dev\" \"cd mobile && npx expo start --dev-client\"",
+    "dev:mobile": "cd mobile && npx expo start --dev-client",
+    "dev:phone": "./scripts/dev-phone.sh",
+    "dev:phone:go": "EXPO_DEV_CLIENT=0 ./scripts/dev-phone.sh",
+    "dev:phone:tunnel": "EXPO_MODE=tunnel ./scripts/dev-phone.sh",
+    "dev:phone:clear": "EXPO_CLEAR=1 ./scripts/dev-phone.sh"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.0.2",
@@ -33,9 +39,11 @@
     "geist": "^1.7.0",
     "lucide-react": "^0.487.0",
     "next": "~15.5.12",
+    "onnxruntime-node": "^1.24.3",
     "postgres": "^3.4.8",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "sharp": "^0.34.5",
     "tailwind-merge": "^3.0.0",
     "ws": "^8.18.0"
   },
@@ -46,6 +54,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@types/ws": "^8.5.14",
+    "concurrently": "^9.2.1",
     "drizzle-kit": "^0.31.7",
     "eslint": "^9.39.4",
     "eslint-config-next": "^16.1.6",

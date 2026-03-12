@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { useSearchParams } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 import { AppLayout } from "@/components/layout/app-layout";
 import { MobileHeader } from "@/components/layout/mobile-header";
@@ -23,8 +24,20 @@ import {
   Upload,
   AlertCircle,
   ChevronRight,
+  Calendar,
+  Clock,
+  CheckCircle2,
+  XCircle,
+  Loader2,
+  User as UserIcon,
+  Mail,
+  LogOut,
+  Shield,
+  ArrowUpDown,
+  Filter,
 } from "lucide-react";
 import { AddPropertyDialog } from "./add-property-dialog";
+import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
 
 interface Property {
@@ -41,12 +54,38 @@ interface Property {
   notes: string | null;
   coverImageUrl: string | null;
   trainingStatus: string | null;
+  readinessScore: number | null;
   createdAt: string;
 }
 
+interface Inspection {
+  id: string;
+  propertyId: string;
+  inspectorId: string;
+  status: string;
+  inspectionMode: string;
+  startedAt: string;
+  completedAt: string | null;
+}
+
+type Tab = "properties" | "inspections" | "profile";
+
+function getScoreColor(score: number) {
+  if (score >= 80) return "text-green-600";
+  if (score >= 50) return "text-yellow-600";
+  return "text-destructive";
+}
+
 export function DashboardContent({ user }: { user: User }) {
+  const searchParams = useSearchParams();
+  const rawTab = searchParams.get("tab");
+  const validTabs: Tab[] = ["properties", "inspections", "profile"];
+  const currentTab: Tab = validTabs.includes(rawTab as Tab) ? (rawTab as Tab) : "properties";
+
   const [properties, setProperties] = useState<Property[]>([]);
+  const [inspections, setInspections] = useState<Inspection[]>([]);
   const [loading, setLoading] = useState(true);
+  const [inspectionsLoading, setInspectionsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [inspectionCount, setInspectionCount] = useState<number | null>(null);
@@ -69,13 +108,17 @@ export function DashboardContent({ user }: { user: User }) {
 
   const fetchInspections = useCallback(async () => {
     try {
+      setInspectionsLoading(true);
       const res = await fetch("/api/inspections", { credentials: "include" });
       if (res.ok) {
         const data = await res.json();
+        setInspections(data);
         setInspectionCount(data.length);
       }
     } catch {
       // Non-critical, fail silently
+    } finally {
+      setInspectionsLoading(false);
     }
   }, []);
 
@@ -88,7 +131,18 @@ export function DashboardContent({ user }: { user: User }) {
     fetchProperties();
   }
 
-  const trainedCount = properties.filter((p) => p.trainingStatus === "trained").length;
+  const trainedCount = useMemo(
+    () => properties.filter((p) => p.trainingStatus === "trained").length,
+    [properties],
+  );
+
+  const tabConfig: Record<Tab, { title: string; subtitle: string }> = {
+    properties: { title: "Properties", subtitle: "Manage your inspections" },
+    inspections: { title: "Inspections", subtitle: "View inspection history" },
+    profile: { title: "Profile", subtitle: "Account settings" },
+  };
+
+  const { title, subtitle } = tabConfig[currentTab] || tabConfig.properties;
 
   return (
     <AppLayout
@@ -98,85 +152,33 @@ export function DashboardContent({ user }: { user: User }) {
       {/* Mobile header */}
       <MobileHeader
         userEmail={user.email || ""}
-        title="Properties"
-        subtitle="Manage your inspections"
+        title={title}
+        subtitle={subtitle}
       />
 
-      <div className="px-4 pb-6 lg:p-8 max-w-[1280px] mx-auto">
-        {/* Desktop header — hidden on mobile */}
-        <div className="hidden lg:flex mb-8 items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold text-heading">Properties</h1>
-            <p className="text-muted-foreground text-sm mt-1">
-              Manage your luxury property inspections
-            </p>
-          </div>
-          <Button onClick={() => setDialogOpen(true)} className="gap-2">
-            <Plus className="h-4 w-4" />
-            Add Property
-          </Button>
-        </div>
+      {currentTab === "properties" && (
+        <PropertiesTab
+          properties={properties}
+          loading={loading}
+          error={error}
+          trainedCount={trainedCount}
+          inspectionCount={inspectionCount}
+          onAddProperty={() => setDialogOpen(true)}
+          onRetry={fetchProperties}
+        />
+      )}
 
-        {/* Quick Stats — horizontal scroll on mobile */}
-        <div className="flex gap-3 overflow-x-auto pb-1 mb-5 lg:mb-8 scrollbar-hide lg:grid lg:grid-cols-3 lg:gap-4 lg:overflow-visible">
-          <StatCard
-            label="Properties"
-            value={properties.length}
-            sub="Total managed"
-            icon={<Home className="h-4 w-4 text-primary" />}
-          />
-          <StatCard
-            label="Trained"
-            value={trainedCount}
-            sub="AI-ready"
-            icon={<Zap className="h-4 w-4 text-primary" />}
-          />
-          <StatCard
-            label="Inspections"
-            value={inspectionCount ?? "--"}
-            sub="Completed"
-            icon={<ClipboardCheck className="h-4 w-4 text-primary" />}
-          />
-        </div>
+      {currentTab === "inspections" && (
+        <InspectionsTab
+          inspections={inspections}
+          properties={properties}
+          loading={inspectionsLoading}
+        />
+      )}
 
-        {/* Error state */}
-        {error && (
-          <div className="flex items-center gap-3 rounded-xl bg-destructive/5 border border-destructive/20 px-4 py-3 mb-5 lg:mb-8">
-            <AlertCircle className="h-5 w-5 text-destructive shrink-0" />
-            <p className="text-sm text-foreground flex-1">{error}</p>
-            <Button variant="outline" size="sm" onClick={fetchProperties} className="shrink-0">
-              Retry
-            </Button>
-          </div>
-        )}
-
-        {/* Property List */}
-        {loading ? (
-          <div className="space-y-3">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="h-20 rounded-xl bg-card border border-border animate-pulse" />
-            ))}
-          </div>
-        ) : properties.length === 0 && !error ? (
-          <EmptyState onAdd={() => setDialogOpen(true)} />
-        ) : (
-          <>
-            {/* Mobile: compact list cards */}
-            <div className="space-y-3 lg:hidden">
-              {properties.map((property) => (
-                <MobilePropertyCard key={property.id} property={property} />
-              ))}
-            </div>
-
-            {/* Desktop: grid cards */}
-            <div className="hidden lg:grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {properties.map((property) => (
-                <DesktopPropertyCard key={property.id} property={property} />
-              ))}
-            </div>
-          </>
-        )}
-      </div>
+      {currentTab === "profile" && (
+        <ProfileTab user={user} />
+      )}
 
       <AddPropertyDialog
         open={dialogOpen}
@@ -184,6 +186,425 @@ export function DashboardContent({ user }: { user: User }) {
         onSuccess={handlePropertyAdded}
       />
     </AppLayout>
+  );
+}
+
+type SortOption = "newest" | "name" | "status";
+type FilterOption = "all" | "trained" | "untrained";
+
+/* ─── Properties Tab ──────────────────────────────────────── */
+function PropertiesTab({
+  properties,
+  loading,
+  error,
+  trainedCount,
+  inspectionCount,
+  onAddProperty,
+  onRetry,
+}: {
+  properties: Property[];
+  loading: boolean;
+  error: string | null;
+  trainedCount: number;
+  inspectionCount: number | null;
+  onAddProperty: () => void;
+  onRetry: () => void;
+}) {
+  const [sortBy, setSortBy] = useState<SortOption>("newest");
+  const [filterBy, setFilterBy] = useState<FilterOption>("all");
+
+  const filteredAndSorted = useMemo(() => {
+    let filtered = properties;
+    if (filterBy === "trained") {
+      filtered = properties.filter((p) => p.trainingStatus === "trained");
+    } else if (filterBy === "untrained") {
+      filtered = properties.filter((p) => p.trainingStatus !== "trained");
+    }
+
+    return [...filtered].sort((a, b) => {
+      if (sortBy === "name") return a.name.localeCompare(b.name);
+      if (sortBy === "status") {
+        const order = (s: string | null) => (s === "trained" ? 0 : s === "training" ? 1 : 2);
+        return order(a.trainingStatus) - order(b.trainingStatus);
+      }
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+  }, [properties, sortBy, filterBy]);
+
+  return (
+    <div className="px-4 pb-6 lg:p-8 max-w-[1280px] mx-auto">
+      {/* Desktop header — hidden on mobile */}
+      <div className="hidden lg:flex mb-8 items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold text-heading">Properties</h1>
+          <p className="text-muted-foreground text-sm mt-1">
+            Manage your luxury property inspections
+          </p>
+        </div>
+        <Button onClick={onAddProperty} className="gap-2">
+          <Plus className="h-4 w-4" />
+          Add Property
+        </Button>
+      </div>
+
+      {/* Quick Stats — horizontal scroll on mobile */}
+      <div className="flex gap-3 overflow-x-auto pb-1 mb-5 lg:mb-8 scrollbar-hide lg:grid lg:grid-cols-3 lg:gap-4 lg:overflow-visible">
+        <StatCard
+          label="Properties"
+          value={loading ? "--" : properties.length}
+          sub="Total managed"
+          icon={<Home className="h-4 w-4 text-primary" />}
+        />
+        <StatCard
+          label="Trained"
+          value={loading ? "--" : trainedCount}
+          sub="AI-ready"
+          icon={<Zap className="h-4 w-4 text-primary" />}
+        />
+        <StatCard
+          label="Inspections"
+          value={inspectionCount ?? "--"}
+          sub="Completed"
+          icon={<ClipboardCheck className="h-4 w-4 text-primary" />}
+        />
+      </div>
+
+      {/* Filter & Sort */}
+      {properties.length > 0 && (
+        <div className="flex items-center gap-2 mb-4 lg:mb-6">
+          <div className="flex items-center gap-1.5 text-xs">
+            <Filter className="h-3.5 w-3.5 text-muted-foreground" />
+            <select
+              value={filterBy}
+              onChange={(e) => setFilterBy(e.target.value as FilterOption)}
+              className="bg-card border border-border rounded-lg px-2 py-1.5 text-xs text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+            >
+              <option value="all">All</option>
+              <option value="trained">Trained</option>
+              <option value="untrained">Untrained</option>
+            </select>
+          </div>
+          <div className="flex items-center gap-1.5 text-xs">
+            <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as SortOption)}
+              className="bg-card border border-border rounded-lg px-2 py-1.5 text-xs text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+            >
+              <option value="newest">Newest First</option>
+              <option value="name">Name A-Z</option>
+              <option value="status">Status</option>
+            </select>
+          </div>
+        </div>
+      )}
+
+      {/* Error state */}
+      {error && (
+        <div className="flex items-center gap-3 rounded-xl bg-destructive/5 border border-destructive/20 px-4 py-3 mb-5 lg:mb-8">
+          <AlertCircle className="h-5 w-5 text-destructive shrink-0" />
+          <p className="text-sm text-foreground flex-1">{error}</p>
+          <Button variant="outline" size="sm" onClick={onRetry} className="shrink-0">
+            Retry
+          </Button>
+        </div>
+      )}
+
+      {/* Property List */}
+      {loading ? (
+        <div className="space-y-3">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="h-20 rounded-xl bg-card border border-border animate-pulse" />
+          ))}
+        </div>
+      ) : properties.length === 0 && !error ? (
+        <EmptyState onAdd={onAddProperty} />
+      ) : filteredAndSorted.length === 0 ? (
+        <div className="py-12 text-center">
+          <p className="text-sm text-muted-foreground">No properties match the current filter.</p>
+        </div>
+      ) : (
+        <>
+          {/* Mobile: compact list cards */}
+          <div className="space-y-3 lg:hidden">
+            {filteredAndSorted.map((property) => (
+              <MobilePropertyCard key={property.id} property={property} />
+            ))}
+          </div>
+
+          {/* Desktop: grid cards */}
+          <div className="hidden lg:grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {filteredAndSorted.map((property) => (
+              <DesktopPropertyCard key={property.id} property={property} />
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ─── Inspections Tab ─────────────────────────────────────── */
+function InspectionsTab({
+  inspections,
+  properties,
+  loading,
+}: {
+  inspections: Inspection[];
+  properties: Property[];
+  loading: boolean;
+}) {
+  // Create a map of property id → property for quick lookups
+  const propertyMap = useMemo(
+    () => new Map(properties.map((p) => [p.id, p])),
+    [properties],
+  );
+
+  function getStatusConfig(status: string) {
+    switch (status) {
+      case "completed":
+        return { icon: CheckCircle2, label: "Completed", color: "text-green-600", bg: "bg-green-500/10 border-green-500/20" };
+      case "in_progress":
+        return { icon: Loader2, label: "In Progress", color: "text-primary", bg: "bg-primary/10 border-primary/20" };
+      case "failed":
+        return { icon: XCircle, label: "Failed", color: "text-destructive", bg: "bg-destructive/10 border-destructive/20" };
+      default:
+        return { icon: Clock, label: status, color: "text-muted-foreground", bg: "bg-muted border-border" };
+    }
+  }
+
+  function formatDate(dateStr: string) {
+    const date = new Date(dateStr);
+    return date.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  }
+
+  function formatTime(dateStr: string) {
+    const date = new Date(dateStr);
+    return date.toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  }
+
+  function getModeLabel(mode: string) {
+    const labels: Record<string, string> = {
+      turnover: "Turnover",
+      maintenance: "Maintenance",
+      owner_arrival: "Owner Arrival",
+      vacancy_check: "Vacancy Check",
+    };
+    return labels[mode] || mode;
+  }
+
+  return (
+    <div className="px-4 pb-6 lg:p-8 max-w-[1280px] mx-auto">
+      {/* Desktop header */}
+      <div className="hidden lg:flex mb-8 items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold text-heading">Inspections</h1>
+          <p className="text-muted-foreground text-sm mt-1">
+            View and manage your property inspections
+          </p>
+        </div>
+      </div>
+
+      {/* Stats */}
+      <div className="flex gap-3 overflow-x-auto pb-1 mb-5 lg:mb-8 scrollbar-hide lg:grid lg:grid-cols-3 lg:gap-4 lg:overflow-visible">
+        <StatCard
+          label="Total"
+          value={inspections.length}
+          sub="All inspections"
+          icon={<ClipboardCheck className="h-4 w-4 text-primary" />}
+        />
+        <StatCard
+          label="Completed"
+          value={inspections.filter((i) => i.status === "completed").length}
+          sub="Finished"
+          icon={<CheckCircle2 className="h-4 w-4 text-green-600" />}
+        />
+        <StatCard
+          label="In Progress"
+          value={inspections.filter((i) => i.status === "in_progress").length}
+          sub="Active"
+          icon={<Loader2 className="h-4 w-4 text-primary" />}
+        />
+      </div>
+
+      {loading ? (
+        <div className="space-y-3">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="h-20 rounded-xl bg-card border border-border animate-pulse" />
+          ))}
+        </div>
+      ) : inspections.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-16 px-4">
+          <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-5">
+            <ClipboardCheck className="h-8 w-8 text-primary" />
+          </div>
+          <h3 className="text-lg font-semibold text-foreground mb-2">No Inspections Yet</h3>
+          <p className="text-sm text-muted-foreground text-center max-w-[280px] mb-6">
+            Train a property first, then start your first inspection from the property detail page.
+          </p>
+          <Link href="/dashboard">
+            <Button variant="outline" className="gap-2 rounded-xl h-11 px-6">
+              <Home className="h-4 w-4" />
+              View Properties
+            </Button>
+          </Link>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {inspections.map((inspection) => {
+            const property = propertyMap.get(inspection.propertyId);
+            const statusConfig = getStatusConfig(inspection.status);
+            const StatusIcon = statusConfig.icon;
+
+            return (
+              <Link key={inspection.id} href={`/inspection/${inspection.id}`}>
+                <div className="flex items-center gap-3.5 p-4 rounded-2xl bg-card border border-border hover:border-primary/50 transition-all cursor-pointer group">
+                  {/* Status icon */}
+                  <div className={`h-10 w-10 rounded-xl flex items-center justify-center shrink-0 border ${statusConfig.bg}`}>
+                    <StatusIcon className={`h-5 w-5 ${statusConfig.color} ${inspection.status === "in_progress" ? "animate-spin" : ""}`} />
+                  </div>
+
+                  {/* Info */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-semibold text-foreground truncate">
+                        {property?.name || "Unknown Property"}
+                      </p>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full border whitespace-nowrap ${statusConfig.bg} ${statusConfig.color}`}>
+                        {statusConfig.label}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3 mt-1">
+                      <span className="text-xs text-muted-foreground flex items-center gap-1">
+                        <Calendar className="h-3 w-3" />
+                        {formatDate(inspection.startedAt)}
+                      </span>
+                      <span className="text-xs text-muted-foreground flex items-center gap-1">
+                        <Clock className="h-3 w-3" />
+                        {formatTime(inspection.startedAt)}
+                      </span>
+                      <span className="text-xs text-muted-foreground capitalize">
+                        {getModeLabel(inspection.inspectionMode)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Arrow */}
+                  <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-primary shrink-0 transition-colors" />
+                </div>
+              </Link>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── Profile Tab ─────────────────────────────────────────── */
+function ProfileTab({ user }: { user: User }) {
+  const [signOutError, setSignOutError] = useState<string | null>(null);
+
+  async function handleSignOut() {
+    setSignOutError(null);
+    try {
+      const supabase = createClient();
+      await supabase.auth.signOut();
+      window.location.href = "/login";
+    } catch {
+      setSignOutError("Failed to sign out. Please try again.");
+    }
+  }
+
+  const createdAt = user.created_at
+    ? new Date(user.created_at).toLocaleDateString("en-US", {
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+      })
+    : null;
+
+  return (
+    <div className="px-4 pb-6 lg:p-8 max-w-[1280px] mx-auto">
+      {/* Desktop header */}
+      <div className="hidden lg:flex mb-8 items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold text-heading">Profile</h1>
+          <p className="text-muted-foreground text-sm mt-1">
+            Your account settings
+          </p>
+        </div>
+      </div>
+
+      <div className="space-y-4 max-w-lg">
+        {/* Avatar + Name */}
+        <div className="rounded-2xl bg-card border border-border p-6">
+          <div className="flex items-center gap-4 mb-6">
+            <div className="h-16 w-16 rounded-2xl bg-primary/10 flex items-center justify-center">
+              <UserIcon className="h-8 w-8 text-primary" />
+            </div>
+            <div className="min-w-0">
+              <h2 className="text-lg font-semibold text-foreground truncate">
+                {user.user_metadata?.full_name || user.email?.split("@")[0] || "User"}
+              </h2>
+              <p className="text-sm text-muted-foreground truncate">{user.email}</p>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div className="flex items-center gap-3">
+              <Mail className="h-4 w-4 text-muted-foreground shrink-0" />
+              <div className="min-w-0">
+                <p className="text-xs text-muted-foreground">Email</p>
+                <p className="text-sm text-foreground truncate">{user.email}</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <Shield className="h-4 w-4 text-muted-foreground shrink-0" />
+              <div>
+                <p className="text-xs text-muted-foreground">Account ID</p>
+                <p className="text-sm text-foreground font-mono text-[13px]">{user.id.slice(0, 8)}...{user.id.slice(-4)}</p>
+              </div>
+            </div>
+
+            {createdAt && (
+              <div className="flex items-center gap-3">
+                <Calendar className="h-4 w-4 text-muted-foreground shrink-0" />
+                <div>
+                  <p className="text-xs text-muted-foreground">Member since</p>
+                  <p className="text-sm text-foreground">{createdAt}</p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Sign out error */}
+        {signOutError && (
+          <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-3">
+            <p className="text-sm text-destructive text-center">{signOutError}</p>
+          </div>
+        )}
+
+        {/* Sign out */}
+        <Button
+          variant="outline"
+          onClick={handleSignOut}
+          className="w-full gap-2 rounded-xl h-11 text-destructive hover:text-destructive hover:bg-destructive/5 border-destructive/20"
+        >
+          <LogOut className="h-4 w-4" />
+          Sign Out
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -200,9 +621,9 @@ function StatCard({
   icon: React.ReactNode;
 }) {
   return (
-    <div className="min-w-[140px] flex-shrink-0 lg:min-w-0 lg:flex-shrink rounded-2xl bg-card border border-border p-4">
+    <div className="min-w-[150px] flex-shrink-0 lg:min-w-0 lg:flex-shrink rounded-2xl bg-card border border-border p-4">
       <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-medium text-muted-foreground">{label}</span>
+        <span className="text-xs font-medium text-muted-foreground truncate">{label}</span>
         <div className="h-7 w-7 rounded-lg bg-primary/10 flex items-center justify-center">
           {icon}
         </div>
@@ -219,22 +640,22 @@ function MobilePropertyCard({ property }: { property: Property }) {
     <Link href={`/property/${property.id}`}>
       <div className="flex items-center gap-3.5 p-3 rounded-2xl bg-card border border-border active:bg-card/70 transition-colors">
         {/* Thumbnail */}
-        <div className="h-14 w-14 rounded-xl bg-secondary flex items-center justify-center overflow-hidden shrink-0">
-          {property.coverImageUrl ? (
+        <div className="h-14 w-14 rounded-xl bg-secondary flex items-center justify-center overflow-hidden shrink-0 relative">
+          <Home className="h-6 w-6 text-muted-foreground" />
+          {property.coverImageUrl && (
             <img
               src={property.coverImageUrl}
-              alt={property.name}
-              className="w-full h-full object-cover"
+              alt=""
+              className="absolute inset-0 w-full h-full object-cover"
+              onError={(e) => { e.currentTarget.style.display = "none"; }}
             />
-          ) : (
-            <Home className="h-6 w-6 text-muted-foreground" />
           )}
         </div>
 
         {/* Info */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <p className="text-sm font-semibold text-foreground truncate">
+            <p className="text-sm font-semibold text-foreground truncate" title={property.name}>
               {property.name}
             </p>
             <TrainingBadge status={property.trainingStatus} />
@@ -254,6 +675,16 @@ function MobilePropertyCard({ property }: { property: Property }) {
           </div>
         </div>
 
+        {/* Readiness score */}
+        {property.readinessScore != null && (
+          <div className="shrink-0 text-right mr-1">
+            <span className={`text-lg font-semibold font-mono ${getScoreColor(property.readinessScore)}`}>
+              {property.readinessScore}
+            </span>
+            <p className="text-[9px] text-muted-foreground leading-tight">Score</p>
+          </div>
+        )}
+
         {/* Arrow */}
         <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
       </div>
@@ -265,37 +696,44 @@ function MobilePropertyCard({ property }: { property: Property }) {
 function DesktopPropertyCard({ property }: { property: Property }) {
   return (
     <Link href={`/property/${property.id}`}>
-      <Card className="bg-card border-border cursor-pointer hover:border-primary/50 transition-all group">
-        <div className="h-32 bg-secondary rounded-t-lg flex items-center justify-center overflow-hidden">
-          {property.coverImageUrl ? (
+      <Card className="bg-card border-border cursor-pointer hover:border-primary/50 transition-all group overflow-hidden">
+        <div className="h-32 bg-secondary rounded-t-lg flex items-center justify-center overflow-hidden relative">
+          <Home className="h-8 w-8 text-muted-foreground" />
+          {property.coverImageUrl && (
             <img
               src={property.coverImageUrl}
-              alt={property.name}
-              className="w-full h-full object-cover"
+              alt=""
+              className="absolute inset-0 w-full h-full object-cover"
+              onError={(e) => { e.currentTarget.style.display = "none"; }}
             />
-          ) : (
-            <Home className="h-8 w-8 text-muted-foreground" />
           )}
         </div>
-        <CardHeader className="pb-2">
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-base text-foreground group-hover:text-primary transition-colors">
+        <CardHeader className="pb-2 overflow-hidden">
+          <div className="flex items-center justify-between gap-2 min-w-0">
+            <CardTitle className="text-base text-foreground group-hover:text-primary transition-colors truncate min-w-0" title={property.name}>
               {property.name}
             </CardTitle>
             <TrainingBadge status={property.trainingStatus} />
           </div>
           {(property.address || property.city) && (
-            <CardDescription className="flex items-center gap-1 text-muted-foreground">
-              <MapPin className="h-3 w-3" />
-              {[property.address, property.city, property.state]
-                .filter(Boolean)
-                .join(", ")}
+            <CardDescription className="flex items-center gap-1 text-muted-foreground truncate">
+              <MapPin className="h-3 w-3 shrink-0" />
+              <span className="truncate">
+                {[property.address, property.city, property.state]
+                  .filter(Boolean)
+                  .join(", ")}
+              </span>
             </CardDescription>
           )}
         </CardHeader>
         <CardContent>
           <div className="flex items-center justify-between">
             <div className="flex gap-3 text-xs text-muted-foreground">
+              {property.readinessScore != null && (
+                <span className={`font-medium font-mono ${getScoreColor(property.readinessScore)}`}>
+                  {property.readinessScore}/100
+                </span>
+              )}
               {property.propertyType && (
                 <span className="capitalize">{property.propertyType}</span>
               )}
@@ -337,20 +775,20 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
 function TrainingBadge({ status }: { status: string | null }) {
   if (status === "trained") {
     return (
-      <span className="text-[10px] px-2 py-0.5 rounded-full bg-success/10 text-green-600 border border-green-500/20 whitespace-nowrap">
+      <span className="text-[10px] px-2 py-0.5 rounded-full bg-success/10 text-green-600 border border-green-500/20 whitespace-nowrap shrink-0">
         Trained
       </span>
     );
   }
   if (status === "training") {
     return (
-      <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 whitespace-nowrap">
+      <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 whitespace-nowrap shrink-0">
         Training
       </span>
     );
   }
   return (
-    <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground border border-border whitespace-nowrap">
+    <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground border border-border whitespace-nowrap shrink-0">
       Untrained
     </span>
   );

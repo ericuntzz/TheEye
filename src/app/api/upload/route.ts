@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createClient as createSupabaseClient, type SupabaseClient } from "@supabase/supabase-js";
 import { getDbUser, isValidUUID } from "@/lib/auth";
 import { db } from "@/server/db";
 import { properties, mediaUploads } from "@/server/schema";
@@ -17,6 +17,79 @@ const ALLOWED_TYPES = new Set([
 ]);
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+const STORAGE_UPLOAD_RETRIES = 5;
+
+function createStorageAdminClient(): SupabaseClient {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl || !serviceRoleKey) {
+    throw new Error("Missing Supabase storage server credentials");
+  }
+
+  return createSupabaseClient(supabaseUrl, serviceRoleKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
+}
+
+function isBucketMissingError(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return normalized.includes("not found") || normalized.includes("bucket");
+}
+
+function isTransientUploadError(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("fetch failed") ||
+    normalized.includes("network") ||
+    normalized.includes("timed out") ||
+    normalized.includes("timeout") ||
+    normalized.includes("econnreset") ||
+    normalized.includes("socket")
+  );
+}
+
+async function uploadToPropertyMediaWithRetry(
+  supabase: SupabaseClient,
+  path: string,
+  data: Buffer,
+  contentType: string,
+): Promise<{ error: { message: string } | null }> {
+  let lastError: { message: string } | null = null;
+
+  for (let attempt = 1; attempt <= STORAGE_UPLOAD_RETRIES; attempt++) {
+    const { error } = await supabase.storage
+      .from("property-media")
+      .upload(path, data, {
+        contentType,
+        upsert: false,
+      });
+
+    if (!error) {
+      return { error: null };
+    }
+
+    lastError = { message: error.message };
+    const msg = error.message || "Upload failed";
+
+    if (isBucketMissingError(msg)) {
+      await supabase.storage.createBucket("property-media", { public: true });
+      continue;
+    }
+
+    if (isTransientUploadError(msg) && attempt < STORAGE_UPLOAD_RETRIES) {
+      await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
+      continue;
+    }
+
+    return { error: { message: msg } };
+  }
+
+  return { error: lastError || { message: "Upload failed after retries" } };
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -32,9 +105,31 @@ export async function POST(request: NextRequest) {
     return handleBase64Upload(request, dbUser.id);
   }
 
-  const supabase = await createClient();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const formData = await request.formData() as any;
+  const supabase = createStorageAdminClient();
+  let formData: {
+    get(name: string): FormDataEntryValue | null;
+  };
+  try {
+    formData = (await request.formData()) as unknown as {
+      get(name: string): FormDataEntryValue | null;
+    };
+  } catch (formErr) {
+    const msg = formErr instanceof Error ? formErr.message : String(formErr);
+    if (
+      msg.toLowerCase().includes("formdata") ||
+      msg.toLowerCase().includes("boundary") ||
+      msg.toLowerCase().includes("body")
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Upload payload could not be parsed. Keep each video under 50MB and retry.",
+        },
+        { status: 413 },
+      );
+    }
+    throw formErr;
+  }
   const file = formData.get("file") as File | null;
   const propertyId = formData.get("propertyId") as string | null;
 
@@ -88,49 +183,18 @@ export async function POST(request: NextRequest) {
   const arrayBuffer = await file.arrayBuffer();
   const buffer = Buffer.from(arrayBuffer);
 
-  let uploadSuccess = false;
-
-  const { error: uploadError } = await supabase.storage
-    .from("property-media")
-    .upload(fileName, buffer, {
-      contentType: file.type,
-      upsert: false,
-    });
-
+  const { error: uploadError } = await uploadToPropertyMediaWithRetry(
+    supabase,
+    fileName,
+    buffer,
+    file.type,
+  );
   if (uploadError) {
     console.error("[upload] Storage error:", uploadError.message);
-    if (
-      uploadError.message.includes("not found") ||
-      uploadError.message.includes("Bucket")
-    ) {
-      await supabase.storage.createBucket("property-media", {
-        public: true,
-      });
-      const { error: retryError } = await supabase.storage
-        .from("property-media")
-        .upload(fileName, buffer, {
-          contentType: file.type,
-          upsert: false,
-        });
-      if (retryError) {
-        return NextResponse.json(
-          { error: `Upload failed: ${retryError.message}` },
-          { status: 500 },
-        );
-      }
-      uploadSuccess = true;
-    } else {
-      return NextResponse.json(
-        { error: `Upload failed: ${uploadError.message}` },
-        { status: 500 },
-      );
-    }
-  } else {
-    uploadSuccess = true;
-  }
-
-  if (!uploadSuccess) {
-    return NextResponse.json({ error: "Upload failed" }, { status: 500 });
+    return NextResponse.json(
+      { error: `Upload failed: ${uploadError.message}` },
+      { status: 500 },
+    );
   }
 
   // Get public URL
@@ -249,6 +313,8 @@ async function handleBase64Upload(request: NextRequest, userId: string) {
     "image/gif": "gif",
     "image/heic": "heic",
     "image/heif": "heif",
+    "video/mp4": "mp4",
+    "video/quicktime": "mov",
   };
   const ext = extMap[mimeType] || "jpg";
   const generatedName =
@@ -256,40 +322,19 @@ async function handleBase64Upload(request: NextRequest, userId: string) {
     `capture-${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
   const storagePath = `${propertyId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
 
-  const supabase = await createClient();
+  const supabase = createStorageAdminClient();
 
-  const { error: uploadError } = await supabase.storage
-    .from("property-media")
-    .upload(storagePath, buffer, {
-      contentType: mimeType,
-      upsert: false,
-    });
-
+  const { error: uploadError } = await uploadToPropertyMediaWithRetry(
+    supabase,
+    storagePath,
+    buffer,
+    mimeType,
+  );
   if (uploadError) {
-    // Try creating bucket if it doesn't exist
-    if (
-      uploadError.message.includes("not found") ||
-      uploadError.message.includes("Bucket")
-    ) {
-      await supabase.storage.createBucket("property-media", { public: true });
-      const { error: retryError } = await supabase.storage
-        .from("property-media")
-        .upload(storagePath, buffer, {
-          contentType: mimeType,
-          upsert: false,
-        });
-      if (retryError) {
-        return NextResponse.json(
-          { error: `Upload failed: ${retryError.message}` },
-          { status: 500 },
-        );
-      }
-    } else {
-      return NextResponse.json(
-        { error: `Upload failed: ${uploadError.message}` },
-        { status: 500 },
-      );
-    }
+    return NextResponse.json(
+      { error: `Upload failed: ${uploadError.message}` },
+      { status: 500 },
+    );
   }
 
   const {

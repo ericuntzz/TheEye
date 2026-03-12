@@ -5,13 +5,10 @@ import type { User } from "@supabase/supabase-js";
 import { AppLayout } from "@/components/layout/app-layout";
 import { MobileNav } from "@/components/layout/mobile-nav";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-} from "@/components/ui/card";
+// Card components available if needed for future UI additions
 import {
   ArrowLeft,
-  Camera,
+  ScanLine,
   CheckCircle,
   AlertTriangle,
   Loader2,
@@ -206,6 +203,12 @@ export function InspectionFlow({
     return "text-destructive";
   }
 
+  function getScoreLabel(score: number) {
+    if (score >= SCORE_THRESHOLDS.good) return "Good";
+    if (score >= SCORE_THRESHOLDS.warning) return "Fair";
+    return "Needs Attention";
+  }
+
   const progressPercent = totalRooms > 0 ? Math.round((completedCount / totalRooms) * 100) : 0;
 
   return (
@@ -241,9 +244,13 @@ export function InspectionFlow({
                 <div className={`text-2xl font-semibold font-mono ${getScoreColor(overallScore)}`}>
                   {overallScore}
                 </div>
-                <span className="text-[10px] text-muted-foreground leading-tight">
-                  Readiness<br />Score
-                </span>
+                <div className="text-right">
+                  <span className={`text-[10px] font-medium ${getScoreColor(overallScore)}`}>
+                    {getScoreLabel(overallScore)}
+                  </span>
+                  <br />
+                  <span className="text-[10px] text-muted-foreground">Score</span>
+                </div>
               </div>
             )}
           </div>
@@ -271,6 +278,9 @@ export function InspectionFlow({
                 <div className={`text-3xl font-semibold font-mono ${getScoreColor(overallScore)}`}>
                   {overallScore}
                 </div>
+                <p className={`text-xs font-medium ${getScoreColor(overallScore)}`}>
+                  {getScoreLabel(overallScore)}
+                </p>
                 <p className="text-xs text-muted-foreground">Readiness Score</p>
               </div>
             )}
@@ -328,7 +338,7 @@ export function InspectionFlow({
                         className="w-full h-full object-cover"
                       />
                     ) : (
-                      <Camera className="h-5 w-5 text-muted-foreground" />
+                      <ScanLine className="h-5 w-5 text-muted-foreground" />
                     )}
                   </div>
 
@@ -390,7 +400,7 @@ export function InspectionFlow({
                         }
                         className="gap-1 rounded-xl"
                       >
-                        <Camera className="h-3.5 w-3.5" />
+                        <ScanLine className="h-3.5 w-3.5" />
                         <span className="hidden sm:inline">Capture</span>
                       </Button>
                     ) : (

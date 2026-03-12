@@ -9,30 +9,33 @@
  * - Confirmed findings grouped by severity
  */
 
-import React, { useMemo } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
   ScrollView,
   TouchableOpacity,
   StyleSheet,
+  ActivityIndicator,
+  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
-import type { RootStackParamList, SummaryData } from "../navigation";
-import { colors, radius, shadows } from '../lib/tokens';
+import type { RootStackParamList, SummaryData, SummaryFindingData } from "../navigation";
+import { getInspection, deleteInspectionFinding } from "../lib/api";
+import { colors } from "../lib/tokens";
 
 type Nav = NativeStackNavigationProp<RootStackParamList, "InspectionSummary">;
 type Route = RouteProp<RootStackParamList, "InspectionSummary">;
 
 const SEVERITY_COLORS: Record<string, string> = {
-  cosmetic: "#64748b",
-  maintenance: "#eab308",
-  safety: "#4DA6FF",
-  urgent_repair: "#ef4444",
-  guest_damage: "#a855f7",
+  cosmetic: colors.slate500,
+  maintenance: colors.warning,
+  safety: colors.primary,
+  urgent_repair: colors.error,
+  guest_damage: colors.purple,
 };
 
 const SEVERITY_LABELS: Record<string, string> = {
@@ -60,10 +63,10 @@ function formatDuration(ms: number): string {
 
 function getScoreColor(score: number | null): string {
   if (score === null) return colors.muted;
-  if (score >= 90) return "#22c55e";
-  if (score >= 70) return "#eab308";
+  if (score >= 90) return colors.success;
+  if (score >= 70) return colors.warning;
   if (score >= 50) return colors.primary;
-  return "#ef4444";
+  return colors.error;
 }
 
 function getTierLabel(tier: string): string {
@@ -82,21 +85,181 @@ function getTierLabel(tier: string): string {
 function getTierColor(tier: string): string {
   switch (tier) {
     case "thorough":
-      return "#22c55e";
+      return colors.success;
     case "standard":
       return colors.primary;
     default:
-      return "#94a3b8";
+      return colors.slate300;
   }
+}
+
+function removeFindingFromSummary(
+  summary: SummaryData,
+  findingId: string,
+): SummaryData {
+  const nextRooms = summary.rooms.map((room) => {
+    const nextFindings = room.findings.filter((finding) => finding.id !== findingId);
+    return {
+      ...room,
+      findings: nextFindings,
+      confirmedFindings: nextFindings.filter((finding) => finding.status !== "dismissed").length,
+    };
+  });
+
+  return {
+    ...summary,
+    rooms: nextRooms,
+    confirmedFindings: summary.confirmedFindings.filter((finding) => finding.id !== findingId),
+  };
+}
+
+function mapInspectionToSummary(payload: {
+  inspectionMode?: string;
+  completionTier?: string | null;
+  readinessScore?: number | null;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  rooms?: Array<{
+    id: string;
+    name: string;
+    baselineImages?: Array<{ id: string }>;
+  }>;
+  results?: Array<{
+    id: string;
+    roomId: string;
+    baselineImageId: string;
+    score: number | null;
+    findings?: Array<{
+      id?: string;
+      description?: string;
+      severity?: string;
+      confidence?: number;
+      category?: string;
+      status?: string;
+      source?: "manual_note" | "ai";
+    }>;
+  }>;
+}): SummaryData {
+  const rooms = payload.rooms || [];
+  const results = payload.results || [];
+
+  const roomMeta = new Map(
+    rooms.map((room) => [
+      room.id,
+      {
+        roomName: room.name,
+        anglesTotal: room.baselineImages?.length || 0,
+      },
+    ]),
+  );
+
+  const roomBuckets = new Map<
+    string,
+    {
+      baselineIds: Set<string>;
+      scores: number[];
+      findings: SummaryFindingData[];
+    }
+  >();
+
+  for (const result of results) {
+    const bucket = roomBuckets.get(result.roomId) || {
+      baselineIds: new Set<string>(),
+      scores: [],
+      findings: [],
+    };
+    bucket.baselineIds.add(result.baselineImageId);
+    if (typeof result.score === "number") {
+      bucket.scores.push(result.score);
+    }
+
+    const roomName = roomMeta.get(result.roomId)?.roomName || "Room";
+    (result.findings || []).forEach((finding, findingIndex) => {
+      const findingId =
+        typeof finding.id === "string" && finding.id.length > 0
+          ? finding.id
+          : `${result.id}-${findingIndex}`;
+
+      bucket.findings.push({
+        id: findingId,
+        description: finding.description || "Untitled finding",
+        severity: finding.severity || "maintenance",
+        confidence:
+          typeof finding.confidence === "number" ? finding.confidence : 1,
+        category: finding.category || "manual_note",
+        roomName,
+        status: finding.status || "confirmed",
+        source:
+          finding.source ||
+          (finding.category === "manual_note" ? "manual_note" : "ai"),
+        resultId: result.id,
+        findingIndex,
+      });
+    });
+
+    roomBuckets.set(result.roomId, bucket);
+  }
+
+  const summaryRooms = rooms.map((room) => {
+    const bucket = roomBuckets.get(room.id) || {
+      baselineIds: new Set<string>(),
+      scores: [],
+      findings: [],
+    };
+    const anglesTotal = room.baselineImages?.length || 0;
+    const anglesScanned = Math.min(anglesTotal, bucket.baselineIds.size);
+    const score =
+      bucket.scores.length > 0
+        ? bucket.scores.reduce((sum, value) => sum + value, 0) /
+          bucket.scores.length
+        : null;
+    const coverage =
+      anglesTotal > 0 ? Math.round((anglesScanned / anglesTotal) * 100) : 0;
+
+    return {
+      roomId: room.id,
+      roomName: room.name,
+      score,
+      coverage,
+      anglesScanned,
+      anglesTotal,
+      confirmedFindings: bucket.findings.length,
+      findings: bucket.findings,
+    };
+  });
+
+  const allFindings = summaryRooms.flatMap((room) => room.findings);
+  const roomCoverageAverage =
+    summaryRooms.length > 0
+      ? Math.round(
+          summaryRooms.reduce((sum, room) => sum + room.coverage, 0) /
+            summaryRooms.length,
+        )
+      : 0;
+  const startedAt = payload.startedAt ? new Date(payload.startedAt).getTime() : null;
+  const completedAt = payload.completedAt ? new Date(payload.completedAt).getTime() : null;
+  const durationMs =
+    startedAt && completedAt && completedAt > startedAt
+      ? completedAt - startedAt
+      : 0;
+
+  return {
+    overallScore: payload.readinessScore ?? null,
+    completionTier: payload.completionTier || "minimum",
+    overallCoverage: roomCoverageAverage,
+    durationMs,
+    inspectionMode: payload.inspectionMode || "turnover",
+    rooms: summaryRooms,
+    confirmedFindings: allFindings,
+  };
 }
 
 export default function InspectionSummaryScreen() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<Route>();
-  const { summaryData } = route.params;
+  const { summaryData, inspectionId } = route.params;
 
-  const hasData = !!summaryData;
-  const data: SummaryData = summaryData || {
+  const defaultSummary: SummaryData = {
     overallScore: null,
     completionTier: "minimum",
     overallCoverage: 0,
@@ -105,6 +268,88 @@ export default function InspectionSummaryScreen() {
     rooms: [],
     confirmedFindings: [],
   };
+  const [data, setData] = useState<SummaryData>(summaryData || defaultSummary);
+  const [loading, setLoading] = useState(!summaryData);
+  const [error, setError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const hasData = data.rooms.length > 0 || data.confirmedFindings.length > 0;
+
+  useEffect(() => {
+    setData(summaryData || defaultSummary);
+    setLoading(!summaryData);
+    setError(null);
+  }, [summaryData]);
+
+  useEffect(() => {
+    if (summaryData || !inspectionId) return;
+
+    let cancelled = false;
+    const load = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const inspectionPayload = await getInspection(inspectionId);
+        if (cancelled) return;
+        setData(mapInspectionToSummary(inspectionPayload));
+      } catch (err) {
+        if (!cancelled) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Failed to load inspection details",
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [inspectionId, summaryData]);
+
+  const handleDeleteNote = useCallback(
+    (finding: SummaryFindingData) => {
+      Alert.alert(
+        "Delete Note",
+        "Remove this note from inspection details?",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Delete",
+            style: "destructive",
+            onPress: async () => {
+              const previous = data;
+              setData((current) => removeFindingFromSummary(current, finding.id));
+              setDeletingId(finding.id);
+              try {
+                if (finding.resultId) {
+                  await deleteInspectionFinding(inspectionId, {
+                    resultId: finding.resultId,
+                    findingId: finding.id,
+                    findingIndex: finding.findingIndex,
+                  });
+                }
+              } catch (err) {
+                setData(previous);
+                Alert.alert(
+                  "Delete failed",
+                  err instanceof Error ? err.message : "Failed to delete note",
+                );
+              } finally {
+                setDeletingId(null);
+              }
+            },
+          },
+        ],
+      );
+    },
+    [data, inspectionId],
+  );
 
   // Group confirmed findings by severity
   const findingsBySeverity = useMemo(() => {
@@ -127,6 +372,35 @@ export default function InspectionSummaryScreen() {
     : "--";
 
   const scoreColor = getScoreColor(data.overallScore);
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingState}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={styles.loadingText}>Loading inspection details...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (error) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingState}>
+          <Text style={styles.errorTitle}>Unable to load inspection details</Text>
+          <Text style={styles.errorBody}>{error}</Text>
+          <TouchableOpacity
+            style={styles.completeButton}
+            onPress={() => navigation.goBack()}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.completeButtonText}>Back</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -272,10 +546,10 @@ export default function InspectionSummaryScreen() {
                         width: `${room.coverage}%`,
                         backgroundColor:
                           room.coverage >= 90
-                            ? "#22c55e"
+                            ? colors.success
                             : room.coverage >= 50
                               ? colors.primary
-                              : "#94a3b8",
+                              : colors.slate300,
                       },
                     ]}
                   />
@@ -295,7 +569,7 @@ export default function InspectionSummaryScreen() {
                   <View
                     style={[
                       styles.severityDot,
-                      { backgroundColor: SEVERITY_COLORS[severity] || "#64748b" },
+                      { backgroundColor: SEVERITY_COLORS[severity] || colors.slate500 },
                     ]}
                   />
                   <Text style={styles.severityLabel}>
@@ -310,14 +584,32 @@ export default function InspectionSummaryScreen() {
                     <View
                       style={[
                         styles.findingAccent,
-                        { backgroundColor: SEVERITY_COLORS[severity] || "#64748b" },
+                        { backgroundColor: SEVERITY_COLORS[severity] || colors.slate500 },
                       ]}
                     />
                     <View style={styles.findingContent}>
                       <Text style={styles.findingDescription}>
                         {finding.description}
                       </Text>
-                      <Text style={styles.findingRoom}>{finding.roomName}</Text>
+                      <View style={styles.findingMetaRow}>
+                        <Text style={styles.findingRoom}>{finding.roomName}</Text>
+                        {finding.source === "manual_note" && (
+                          <View style={styles.noteBadge}>
+                            <Text style={styles.noteBadgeText}>NOTE</Text>
+                          </View>
+                        )}
+                      </View>
+                      {finding.source === "manual_note" && (
+                        <TouchableOpacity
+                          style={styles.deleteNoteButton}
+                          onPress={() => handleDeleteNote(finding)}
+                          disabled={deletingId === finding.id}
+                        >
+                          <Text style={styles.deleteNoteButtonText}>
+                            {deletingId === finding.id ? "Deleting..." : "Delete Note"}
+                          </Text>
+                        </TouchableOpacity>
+                      )}
                     </View>
                   </View>
                 ))}
@@ -355,6 +647,31 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
+  loadingState: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 24,
+    gap: 12,
+  },
+  loadingText: {
+    color: colors.muted,
+    fontSize: 14,
+    fontWeight: "500",
+  },
+  errorTitle: {
+    color: colors.heading,
+    fontSize: 18,
+    fontWeight: "600",
+    textAlign: "center",
+  },
+  errorBody: {
+    color: colors.error,
+    fontSize: 14,
+    fontWeight: "500",
+    textAlign: "center",
+    marginBottom: 12,
+  },
   content: {
     padding: 20,
     paddingTop: 32,
@@ -388,7 +705,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   durationText: {
-    color: "#475569",
+    color: colors.slate600,
     fontSize: 13,
     fontWeight: "500",
   },
@@ -415,7 +732,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   scoreSubtext: {
-    color: "#475569",
+    color: colors.slate600,
     fontSize: 14,
     marginTop: 4,
     fontWeight: "500",
@@ -514,7 +831,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   roomStat: {
-    color: "#475569",
+    color: colors.slate600,
     fontSize: 12,
     fontWeight: "500",
   },
@@ -587,6 +904,11 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 14,
   },
+  findingMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
   findingDescription: {
     color: colors.foreground,
     fontSize: 14,
@@ -595,9 +917,38 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
   findingRoom: {
-    color: "#475569",
+    color: colors.slate600,
     fontSize: 12,
     fontWeight: "500",
+  },
+  noteBadge: {
+    backgroundColor: "rgba(77,166,255,0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(77,166,255,0.28)",
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  noteBadgeText: {
+    color: colors.primary,
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 0.6,
+  },
+  deleteNoteButton: {
+    marginTop: 8,
+    alignSelf: "flex-start",
+    borderWidth: 1,
+    borderColor: "rgba(239,68,68,0.28)",
+    backgroundColor: "rgba(239,68,68,0.08)",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  deleteNoteButtonText: {
+    color: colors.error,
+    fontSize: 12,
+    fontWeight: "600",
   },
   emptyFindings: {
     backgroundColor: colors.card,
@@ -609,11 +960,11 @@ const styles = StyleSheet.create({
   },
   emptyIcon: {
     fontSize: 24,
-    color: "#334155",
+    color: colors.slate700,
     marginBottom: 8,
   },
   emptyText: {
-    color: "#475569",
+    color: colors.slate600,
     fontSize: 15,
     fontWeight: "500",
   },

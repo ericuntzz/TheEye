@@ -15,7 +15,7 @@ import {
   Loader2,
   CheckCircle,
   AlertCircle,
-  Camera,
+  Layers,
   Package,
 } from "lucide-react";
 import { MediaUpload } from "@/components/upload/media-upload";
@@ -223,7 +223,7 @@ export function TrainingMode({
                 <CardContent className="py-4">
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
-                      <Camera className="h-4 w-4 text-primary" />
+                      <Layers className="h-4 w-4 text-primary" />
                       <span className="font-medium text-foreground text-sm">
                         {room.name}
                       </span>

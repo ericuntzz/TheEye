@@ -4,10 +4,12 @@
  * Uses MobileCLIP-S0 embeddings to identify which room the camera is seeing
  * and track which baseline angles have been "scanned" (covered).
  *
- * Phase 2 implementation: cosine similarity against stored baseline embeddings.
- * ONNX Runtime integration deferred until model is bundled.
- * For now, this module provides the interface and fallback behavior.
+ * Supports two modes:
+ * - Auto mode: ONNX model generates live frame embeddings, cosine similarity matches rooms
+ * - Manual mode: Room set manually via setCurrentRoom() when ONNX model unavailable
  */
+
+import type { OnnxModelLoader } from "./onnx-model";
 
 export interface BaselineAngle {
   id: string;
@@ -65,6 +67,7 @@ function cosineSimilarity(a: number[], b: number[]): number {
 export class RoomDetector {
   private baselines: BaselineAngle[] = [];
   private config: RoomDetectorConfig;
+  private modelLoader: OnnxModelLoader | null = null;
 
   // Hysteresis state
   private currentRoomId: string | null = null;
@@ -75,8 +78,56 @@ export class RoomDetector {
   private scannedAngles = new Map<string, Set<string>>();
   private totalAnglesPerRoom = new Map<string, number>();
 
+  // Adaptive rate tracking
+  private consecutiveConfidentFrames = 0;
+  private readonly CONFIDENT_THRESHOLD = 0.99;
+  private readonly SLOWDOWN_AFTER_FRAMES = 90; // ~30s at 3fps
+
   constructor(config?: Partial<RoomDetectorConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config };
+  }
+
+  /**
+   * Set the ONNX model loader for auto room detection.
+   * If not set or model unavailable, room detection falls back to manual mode.
+   */
+  setModelLoader(loader: OnnxModelLoader) {
+    this.modelLoader = loader;
+  }
+
+  /**
+   * Whether auto room detection is available (ONNX model loaded).
+   */
+  isAutoDetectAvailable(): boolean {
+    return this.modelLoader?.isLoaded ?? false;
+  }
+
+  /**
+   * Process a camera frame URI for auto room detection.
+   * Returns null if model unavailable — caller should use manual switching.
+   */
+  async processFrameFromUri(imageUri: string): Promise<{
+    room: RoomMatch | null;
+    anglesScanned: AngleScanResult[];
+    roomChanged: boolean;
+  } | null> {
+    if (!this.modelLoader?.isLoaded) return null;
+
+    const embedding = await this.modelLoader.generateEmbedding(imageUri);
+    if (!embedding) return null;
+
+    return this.processFrame(Array.from(embedding));
+  }
+
+  /**
+   * Get the recommended frame processing interval in ms.
+   * Adaptive: 333ms (3fps) normally, 1000ms (1fps) when highly confident for extended period.
+   */
+  getRecommendedInterval(): number {
+    if (this.consecutiveConfidentFrames >= this.SLOWDOWN_AFTER_FRAMES) {
+      return 1000; // 1fps
+    }
+    return 333; // 3fps
   }
 
   /**
@@ -199,6 +250,13 @@ export class RoomDetector {
           confidence: roomScores.get(this.currentRoomId)?.maxSim || 0,
         }
       : bestRoom;
+
+    // Track adaptive rate — slow down when highly confident
+    if (currentRoom && currentRoom.confidence >= this.CONFIDENT_THRESHOLD && !roomChanged) {
+      this.consecutiveConfidentFrames++;
+    } else {
+      this.consecutiveConfidentFrames = 0;
+    }
 
     return { room: currentRoom, anglesScanned, roomChanged };
   }

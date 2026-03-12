@@ -6,7 +6,8 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Eye, Loader2, Mail, Lock, ArrowRight, AlertCircle, CheckCircle } from "lucide-react";
+import { Loader2, Mail, Lock, ArrowRight, AlertCircle, CheckCircle } from "lucide-react";
+import { AtriaMark } from "@/components/ui/atria-mark";
 
 export function LoginForm() {
   const [email, setEmail] = useState("");
@@ -73,11 +74,9 @@ export function LoginForm() {
           <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-80 h-80 bg-[#4DA6FF]/10 rounded-full blur-[100px]" />
           <div className="absolute bottom-1/3 left-1/4 w-48 h-48 bg-[#8B8CFF]/10 rounded-full blur-[80px]" />
           <div className="relative z-10 flex flex-col justify-between p-8 w-full">
-            <div className="flex items-center gap-2.5">
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 backdrop-blur-sm border border-white/10">
-                <Eye className="h-[18px] w-[18px] text-white" />
-              </div>
-              <span className="text-[15px] font-semibold text-white tracking-tight">Atria</span>
+            <div className="flex items-center gap-3">
+              <AtriaMark size={36} color="white" />
+              <span className="text-[15px] font-semibold text-white tracking-[0.18em]">ATRIA</span>
             </div>
             <div>
               <h1 className="text-[28px] font-semibold text-white tracking-tight leading-tight mb-3">
@@ -99,11 +98,9 @@ export function LoginForm() {
         <div className="relative z-10 flex flex-1 items-center justify-center px-6 py-10 sm:px-10 lg:px-14">
           <div className="w-full max-w-[360px]">
             {/* Mobile logo */}
-            <div className="lg:hidden text-center mb-10">
-              <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-[#1B2A4A]/10 border border-stone/30">
-                <Eye className="h-6 w-6 text-heading" />
-              </div>
-              <h1 className="text-xl font-semibold text-heading tracking-tight">Atria</h1>
+            <div className="lg:hidden flex flex-col items-center mb-10">
+              <AtriaMark size={52} color="navy" className="block mb-3" />
+              <h1 className="text-[20px] font-semibold text-heading tracking-[0.22em]">ATRIA</h1>
             </div>
 
             {/* Form header */}
@@ -201,7 +198,7 @@ export function LoginForm() {
               {isSignUp ? "Already have an account?" : "Don't have an account?"}{" "}
               <button
                 type="button"
-                className="text-primary font-medium hover:text-primary/80 transition-colors"
+                className="text-primary font-medium hover:text-primary/80 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary rounded-sm"
                 onClick={() => {
                   setIsSignUp(!isSignUp);
                   setError(null);

@@ -13,10 +13,36 @@ fi
 
 cd "${ROOT_DIR}"
 
-if command -v lsof >/dev/null 2>&1 && lsof -ti tcp:"${PORT}" >/dev/null 2>&1; then
-  echo "Port ${PORT} is already in use. Pick a free port."
+pick_available_port() {
+  local preferred="$1"
+
+  if ! command -v lsof >/dev/null 2>&1; then
+    echo "${preferred}"
+    return 0
+  fi
+
+  for offset in $(seq 0 30); do
+    local candidate=$((preferred + offset))
+    if ! lsof -ti tcp:"${candidate}" >/dev/null 2>&1; then
+      echo "${candidate}"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+if ! RESOLVED_PORT="$(pick_available_port "${PORT}")"; then
+  echo "Unable to find a free port near ${PORT}."
   exit 1
 fi
+
+if [[ "${RESOLVED_PORT}" != "${PORT}" ]]; then
+  echo "Port ${PORT} busy; using ${RESOLVED_PORT} instead."
+fi
+
+PORT="${RESOLVED_PORT}"
+BASE_URL="http://127.0.0.1:${PORT}"
 
 LOG_FILE="/tmp/atria-suite-${MODE}-${PORT}.log"
 SERVER_PID=""
@@ -31,7 +57,11 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 # Keep gate checks deterministic by running against a temporary production server.
-if [[ ! -f ".next/BUILD_ID" ]]; then
+# Health mode always forces a fresh production build because concurrent gate runs
+# can invalidate .next between checks.
+if [[ "${MODE}" == "health" ]]; then
+  npm run build >/tmp/atria-suite-build.log 2>&1
+elif [[ ! -f ".next/BUILD_ID" ]]; then
   npm run build >/tmp/atria-suite-build.log 2>&1
 fi
 

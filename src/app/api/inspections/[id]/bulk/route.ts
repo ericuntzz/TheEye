@@ -17,7 +17,7 @@ interface BulkRoomResult {
   baselineImageId: string;
   currentImageUrl?: string;
   status?: "passed" | "flagged";
-  score: number;
+  score?: number | null;
   findings?: Finding[];
   rawResponse?: string;
 }
@@ -187,23 +187,6 @@ export async function POST(
     ? completionTier
     : undefined;
 
-  // Insert all results
-  const insertedResults = await db
-    .insert(inspectionResults)
-    .values(
-      roomResults.map((result) => ({
-        inspectionId: id,
-        roomId: result.roomId,
-        baselineImageId: result.baselineImageId,
-        currentImageUrl: result.currentImageUrl || "",
-        status: result.status || ((result.findings?.length ?? 0) === 0 ? "passed" : "flagged"),
-        score: result.score ?? 100,
-        findings: result.findings || [],
-        rawResponse: result.rawResponse,
-      })),
-    )
-    .returning();
-
   // Calculate overall readiness score
   const scores = roomResults.map((r) => r.score).filter((s) => s != null);
   const overallScore =
@@ -211,17 +194,41 @@ export async function POST(
       ? scores.reduce((a, b) => a + b, 0) / scores.length
       : null;
 
-  // Update inspection with completion data
-  await db
-    .update(inspections)
-    .set({
-      status: "completed",
-      completionTier: validatedTier,
-      readinessScore: overallScore,
-      notes: (notes as string) || undefined,
-      completedAt: new Date(),
-    })
-    .where(eq(inspections.id, id));
+  // Transaction: atomically insert results + update inspection status
+  const insertedResults = await db.transaction(async (tx) => {
+    const inserted = await tx
+      .insert(inspectionResults)
+      .values(
+        roomResults.map((result) => ({
+          inspectionId: id,
+          roomId: result.roomId,
+          baselineImageId: result.baselineImageId,
+          currentImageUrl: result.currentImageUrl || "",
+          status:
+            result.status ||
+            (result.score === null
+              ? "flagged"
+              : ((result.findings?.length ?? 0) === 0 ? "passed" : "flagged")),
+          score: result.score ?? null,
+          findings: result.findings || [],
+          rawResponse: result.rawResponse,
+        })),
+      )
+      .returning();
+
+    await tx
+      .update(inspections)
+      .set({
+        status: "completed",
+        completionTier: validatedTier,
+        readinessScore: overallScore,
+        notes: (notes as string) || undefined,
+        completedAt: new Date(),
+      })
+      .where(eq(inspections.id, id));
+
+    return inserted;
+  });
 
   // Emit InspectionCompleted event
   const totalFindings = roomResults.reduce(

@@ -4,7 +4,6 @@ import { db } from "@/server/db";
 import {
   properties,
   baselineVersions,
-  baselineImages,
 } from "@/server/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { emitEventSafe } from "@/lib/events/emit";
@@ -96,37 +95,44 @@ export async function POST(
     );
   }
 
-  // Get next version number using MAX to prevent race conditions
-  const [maxRow] = await db
-    .select({
-      maxVersion: sql<number>`COALESCE(MAX(${baselineVersions.versionNumber}), 0)`,
-    })
-    .from(baselineVersions)
-    .where(eq(baselineVersions.propertyId, id));
+  // Transaction: atomically get next version, deactivate old, create new
+  const version = await db.transaction(async (tx) => {
+    // Serialize version creation per property to avoid duplicate versionNumber under concurrent writes.
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${id}))`);
 
-  const nextVersion = (maxRow?.maxVersion ?? 0) + 1;
+    const [maxRow] = await tx
+      .select({
+        maxVersion: sql<number>`COALESCE(MAX(${baselineVersions.versionNumber}), 0)`,
+      })
+      .from(baselineVersions)
+      .where(eq(baselineVersions.propertyId, id));
 
-  // Deactivate all existing versions in a single atomic query
-  await db
-    .update(baselineVersions)
-    .set({ isActive: false })
-    .where(
-      and(
-        eq(baselineVersions.propertyId, id),
-        eq(baselineVersions.isActive, true),
-      ),
-    );
+    const nextVersion = (maxRow?.maxVersion ?? 0) + 1;
 
-  // Create new active version
-  const [version] = await db
-    .insert(baselineVersions)
-    .values({
-      propertyId: id,
-      versionNumber: nextVersion,
-      label: (label as string) || `Version ${nextVersion}`,
-      isActive: true,
-    })
-    .returning();
+    // Deactivate all existing active versions
+    await tx
+      .update(baselineVersions)
+      .set({ isActive: false })
+      .where(
+        and(
+          eq(baselineVersions.propertyId, id),
+          eq(baselineVersions.isActive, true),
+        ),
+      );
+
+    // Create new active version
+    const [created] = await tx
+      .insert(baselineVersions)
+      .values({
+        propertyId: id,
+        versionNumber: nextVersion,
+        label: (label as string) || `Version ${nextVersion}`,
+        isActive: true,
+      })
+      .returning();
+
+    return created;
+  });
 
   await emitEventSafe({
     eventType: "BaselineVersionCreated",
@@ -134,8 +140,8 @@ export async function POST(
     propertyId: id,
     userId: dbUser.id,
     payload: {
-      versionNumber: nextVersion,
-      label: version.label || `Version ${nextVersion}`,
+      versionNumber: version.versionNumber,
+      label: version.label || `Version ${version.versionNumber}`,
       roomCount: 0,
       baselineImageCount: 0,
     },
@@ -218,21 +224,23 @@ export async function PATCH(
     );
   }
 
-  // Atomic: deactivate all, then activate target
-  await db
-    .update(baselineVersions)
-    .set({ isActive: false })
-    .where(
-      and(
-        eq(baselineVersions.propertyId, id),
-        eq(baselineVersions.isActive, true),
-      ),
-    );
+  // Transaction: atomically deactivate all, then activate target
+  await db.transaction(async (tx) => {
+    await tx
+      .update(baselineVersions)
+      .set({ isActive: false })
+      .where(
+        and(
+          eq(baselineVersions.propertyId, id),
+          eq(baselineVersions.isActive, true),
+        ),
+      );
 
-  await db
-    .update(baselineVersions)
-    .set({ isActive: true })
-    .where(eq(baselineVersions.id, versionId as string));
+    await tx
+      .update(baselineVersions)
+      .set({ isActive: true })
+      .where(eq(baselineVersions.id, versionId as string));
+  });
 
   await emitEventSafe({
     eventType: "BaselineVersionActivated",

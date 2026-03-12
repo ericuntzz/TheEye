@@ -15,18 +15,31 @@ import {
 } from "@/components/ui/card";
 import {
   ArrowLeft,
-  Camera,
+  Layers,
   Zap,
   MapPin,
   Home,
   Loader2,
-  Eye,
+  ScanLine,
   Upload,
   CheckCircle,
   Package,
   AlertCircle,
   ChevronLeft,
+  Pencil,
+  Trash2,
+  ImagePlus,
 } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import Link from "next/link";
 import { TrainingMode } from "./training-mode";
 import { useRouter } from "next/navigation";
@@ -147,6 +160,69 @@ export function PropertyDetail({
     }
   }
 
+  // Edit & Delete state
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editAddress, setEditAddress] = useState("");
+  const [editNotes, setEditNotes] = useState("");
+  const [editLoading, setEditLoading] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+
+  function openEditDialog() {
+    if (!property) return;
+    setEditName(property.name);
+    setEditAddress(property.address || "");
+    setEditNotes(property.notes || "");
+    setEditDialogOpen(true);
+  }
+
+  async function handleEditSave() {
+    setEditLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/properties/${propertyId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: editName,
+          address: editAddress || null,
+          notes: editNotes || null,
+        }),
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || "Failed to update property");
+      }
+      await fetchProperty();
+      setEditDialogOpen(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update property");
+    } finally {
+      setEditLoading(false);
+    }
+  }
+
+  async function handleDelete() {
+    setDeleteLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/properties/${propertyId}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || "Failed to delete property");
+      }
+      router.push("/dashboard");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete property");
+      setDeleteLoading(false);
+    }
+  }
+
   if (loading) {
     return (
       <AppLayout userEmail={user.email || ""} mobileNav={<MobileNav />}>
@@ -208,6 +284,19 @@ export function PropertyDetail({
           )}
           {/* Mobile action buttons */}
           <div className="flex gap-2 mt-4">
+            <Button variant="outline" size="sm" onClick={openEditDialog} className="gap-1.5 rounded-xl h-10">
+              <Pencil className="h-4 w-4" />
+              Edit
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setDeleteDialogOpen(true)}
+              className="gap-1.5 rounded-xl h-10 text-destructive hover:text-destructive hover:bg-destructive/5 border-destructive/20"
+            >
+              <Trash2 className="h-4 w-4" />
+              Delete
+            </Button>
             <Button
               variant="outline"
               size="sm"
@@ -223,7 +312,7 @@ export function PropertyDetail({
                 onClick={handleStartInspection}
                 className="gap-1.5 flex-1 rounded-xl h-10"
               >
-                <Eye className="h-4 w-4" />
+                <ScanLine className="h-4 w-4" />
                 Inspect
               </Button>
             )}
@@ -237,21 +326,39 @@ export function PropertyDetail({
               <ArrowLeft className="h-4 w-4" /> Properties
             </Button>
           </Link>
-          <div className="flex items-start justify-between">
-            <div>
-              <h1 className="text-2xl font-semibold text-foreground">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0 flex-1">
+              <h1 className="text-2xl font-semibold text-foreground truncate" title={property.name}>
                 {property.name}
               </h1>
               {(property.address || property.city) && (
-                <p className="text-sm text-muted-foreground flex items-center gap-1 mt-1">
-                  <MapPin className="h-3 w-3" />
-                  {[property.address, property.city, property.state]
-                    .filter(Boolean)
-                    .join(", ")}
+                <p className="text-sm text-muted-foreground flex items-center gap-1 mt-1 truncate">
+                  <MapPin className="h-3 w-3 shrink-0" />
+                  <span className="truncate">
+                    {[property.address, property.city, property.state]
+                      .filter(Boolean)
+                      .join(", ")}
+                  </span>
                 </p>
               )}
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-2 shrink-0">
+              <Button
+                variant="outline"
+                onClick={openEditDialog}
+                className="gap-2"
+              >
+                <Pencil className="h-4 w-4" />
+                Edit
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setDeleteDialogOpen(true)}
+                className="gap-2 text-destructive hover:text-destructive hover:bg-destructive/5 border-destructive/20"
+              >
+                <Trash2 className="h-4 w-4" />
+                Delete
+              </Button>
               <Button
                 variant="outline"
                 onClick={() => setViewMode("training")}
@@ -262,7 +369,7 @@ export function PropertyDetail({
               </Button>
               {property.trainingStatus === "trained" && (
                 <Button onClick={handleStartInspection} className="gap-2">
-                  <Eye className="h-4 w-4" />
+                  <ScanLine className="h-4 w-4" />
                   New Inspection
                 </Button>
               )}
@@ -280,17 +387,35 @@ export function PropertyDetail({
 
         {/* Property info cards — 2x2 on mobile, 4 cols desktop */}
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4 mb-6 lg:mb-8">
-          <InfoCard label="Type" value={property.propertyType || "—"} icon={Home} />
-          <InfoCard
-            label="Size"
-            value={property.squareFeet ? `${property.squareFeet.toLocaleString()} sqft` : "—"}
-            icon={Package}
-          />
-          <InfoCard
-            label="Rooms"
-            value={rooms.length.toString()}
-            icon={Camera}
-          />
+          {property.propertyType ? (
+            <InfoCard label="Type" value={property.propertyType} icon={Home} />
+          ) : (
+            <InfoCard
+              label="Rooms"
+              value={rooms.length.toString()}
+              icon={Layers}
+            />
+          )}
+          {property.squareFeet ? (
+            <InfoCard
+              label="Size"
+              value={`${property.squareFeet.toLocaleString()} sqft`}
+              icon={Package}
+            />
+          ) : (
+            <InfoCard
+              label="Baselines"
+              value={rooms.reduce((sum, r) => sum + r.baselineImages.length, 0).toString()}
+              icon={ScanLine}
+            />
+          )}
+          {property.propertyType && (
+            <InfoCard
+              label="Rooms"
+              value={rooms.length.toString()}
+              icon={Layers}
+            />
+          )}
           <InfoCard
             label="Status"
             value={
@@ -337,20 +462,22 @@ export function PropertyDetail({
             <div className="space-y-2.5 lg:hidden">
               {rooms.map((room) => (
                 <div key={room.id} className="flex items-center gap-3 p-3 rounded-2xl bg-card border border-border">
-                  <div className="h-12 w-12 rounded-xl bg-secondary flex items-center justify-center overflow-hidden shrink-0">
-                    {room.coverImageUrl ? (
-                      <img src={room.coverImageUrl} alt={room.name} className="w-full h-full object-cover" />
-                    ) : room.baselineImages.length > 0 ? (
-                      <img src={room.baselineImages[0].imageUrl} alt={room.name} className="w-full h-full object-cover" />
-                    ) : (
-                      <Camera className="h-5 w-5 text-muted-foreground" />
+                  <div className="h-12 w-12 rounded-xl bg-secondary flex items-center justify-center overflow-hidden shrink-0 relative">
+                    <ImagePlus className="h-5 w-5 text-muted-foreground" />
+                    {(room.coverImageUrl || room.baselineImages.length > 0) && (
+                      <img
+                        src={room.coverImageUrl || room.baselineImages[0].imageUrl}
+                        alt={room.name}
+                        className="absolute inset-0 w-full h-full object-cover"
+                        onError={(e) => { e.currentTarget.style.display = "none"; }}
+                      />
                     )}
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-foreground truncate">{room.name}</p>
                     <div className="flex gap-3 text-[11px] text-muted-foreground mt-0.5">
-                      <span>{room.baselineImages.length} baselines</span>
-                      <span>{room.items.length} items</span>
+                      <span>{room.baselineImages.length} baseline{room.baselineImages.length !== 1 ? "s" : ""}</span>
+                      <span>{room.items.length} item{room.items.length !== 1 ? "s" : ""}</span>
                     </div>
                   </div>
                 </div>
@@ -361,13 +488,15 @@ export function PropertyDetail({
             <div className="hidden lg:grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {rooms.map((room) => (
                 <Card key={room.id} className="bg-card border-border">
-                  <div className="h-32 bg-secondary rounded-t-lg flex items-center justify-center overflow-hidden">
-                    {room.coverImageUrl ? (
-                      <img src={room.coverImageUrl} alt={room.name} className="w-full h-full object-cover" />
-                    ) : room.baselineImages.length > 0 ? (
-                      <img src={room.baselineImages[0].imageUrl} alt={room.name} className="w-full h-full object-cover" />
-                    ) : (
-                      <Camera className="h-6 w-6 text-muted-foreground" />
+                  <div className="h-32 bg-secondary rounded-t-lg flex items-center justify-center overflow-hidden relative">
+                    <ImagePlus className="h-6 w-6 text-muted-foreground" />
+                    {(room.coverImageUrl || room.baselineImages.length > 0) && (
+                      <img
+                        src={room.coverImageUrl || room.baselineImages[0].imageUrl}
+                        alt={room.name}
+                        className="absolute inset-0 w-full h-full object-cover"
+                        onError={(e) => { e.currentTarget.style.display = "none"; }}
+                      />
                     )}
                   </div>
                   <CardHeader className="pb-2">
@@ -379,7 +508,7 @@ export function PropertyDetail({
                   <CardContent>
                     <div className="flex items-center gap-4 text-xs text-muted-foreground">
                       <span className="flex items-center gap-1">
-                        <Camera className="h-3 w-3" />
+                        <ImagePlus className="h-3 w-3" />
                         {room.baselineImages.length} baseline{room.baselineImages.length !== 1 ? "s" : ""}
                       </span>
                       <span className="flex items-center gap-1">
@@ -415,6 +544,55 @@ export function PropertyDetail({
           </div>
         ) : null}
       </div>
+
+      {/* Edit Property Dialog */}
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Edit Property</DialogTitle>
+            <DialogDescription>Update your property details.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-name">Property Name *</Label>
+              <Input id="edit-name" value={editName} onChange={(e) => setEditName(e.target.value)} required />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-address">Address</Label>
+              <Input id="edit-address" value={editAddress} onChange={(e) => setEditAddress(e.target.value)} placeholder="123 Main St, City, State" />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-notes">Notes</Label>
+              <Input id="edit-notes" value={editNotes} onChange={(e) => setEditNotes(e.target.value)} placeholder="Any additional notes" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleEditSave} disabled={editLoading || !editName.trim()} className="gap-1.5">
+              {editLoading ? "Saving..." : "Save Changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Property Dialog */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete Property</DialogTitle>
+            <DialogDescription>
+              This will permanently delete &quot;{property.name}&quot; and all associated data including rooms, baselines, and inspections. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleDelete} disabled={deleteLoading} className="gap-1.5">
+              <Trash2 className="h-4 w-4" />
+              {deleteLoading ? "Deleting..." : "Delete Property"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AppLayout>
   );
 }

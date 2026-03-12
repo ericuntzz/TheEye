@@ -47,13 +47,40 @@ cd vision-service && pip install -r requirements.txt && cd ..
 # Push database schema
 npm run db:push
 
-# Start both services
-npm run dev:all
+# Start web + Expo together
+npm run dev:full
 ```
 
 - Next.js app: http://localhost:3000
 - Vision service: http://localhost:8000
 - Vision API docs: http://localhost:8000/docs
+
+### Phone Testing (Expo)
+
+```bash
+# Recommended: auto-detect LAN IP and start API + Expo together
+npm run dev:phone
+```
+
+Useful variants:
+
+```bash
+# Use Expo tunnel (if LAN mode is blocked by network policy)
+npm run dev:phone:tunnel
+
+# Clear Metro cache when stale bundles persist
+npm run dev:phone:clear
+
+# Use Expo Go instead of custom dev client
+npm run dev:phone:go
+```
+
+Notes:
+- `dev:phone` sets `EXPO_PUBLIC_API_URL` to `http://<your-lan-ip>:<api-port>` automatically.
+- If default ports are occupied, the launcher automatically picks the next free API/Expo ports and prints them.
+- On a physical phone, `localhost` and `127.0.0.1` point to the phone itself, not your Mac.
+- Verify backend reachability from your phone via the printed `Health check URL` in terminal.
+- If the app shows `Expected MIME-Type ... got text/html`, reopen the latest Expo QR/deep-link and run `npm run dev:phone:clear` to clear stale Metro bundle references.
 
 ## Project Structure
 

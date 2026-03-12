@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDbUser, isValidUUID } from "@/lib/auth";
+import { getDbUser, isValidUUID, isSafeUrl } from "@/lib/auth";
 import { db } from "@/server/db";
-import { properties, propertyConditions } from "@/server/schema";
+import { properties, propertyConditions, rooms } from "@/server/schema";
 import { eq, and } from "drizzle-orm";
 import { emitEventSafe } from "@/lib/events/emit";
 
@@ -144,12 +144,22 @@ export async function POST(
     );
   }
 
-  // Validate optional roomId if provided
+  // Validate optional roomId if provided — must be a valid UUID and belong to this property
   if (roomId !== undefined && roomId !== null) {
     if (typeof roomId !== "string" || !isValidUUID(roomId)) {
       return NextResponse.json(
         { error: "Invalid roomId format" },
         { status: 400 },
+      );
+    }
+    const [room] = await db
+      .select({ id: rooms.id })
+      .from(rooms)
+      .where(and(eq(rooms.id, roomId), eq(rooms.propertyId, id)));
+    if (!room) {
+      return NextResponse.json(
+        { error: "Room not found for this property" },
+        { status: 404 },
       );
     }
   }
@@ -159,6 +169,12 @@ export async function POST(
     if (typeof imageUrl !== "string") {
       return NextResponse.json(
         { error: "imageUrl must be a string" },
+        { status: 400 },
+      );
+    }
+    if (!isSafeUrl(imageUrl)) {
+      return NextResponse.json(
+        { error: "Invalid or unsafe imageUrl" },
         { status: 400 },
       );
     }

@@ -12,13 +12,30 @@ import PropertyTrainingScreen from "./screens/PropertyTraining";
 import InspectionStartScreen from "./screens/InspectionStart";
 import InspectionCameraScreen from "./screens/InspectionCamera";
 import InspectionSummaryScreen from "./screens/InspectionSummary";
+import InspectionHistoryScreen from "./screens/InspectionHistory";
 import PropertyDetailScreen from "./screens/PropertyDetail";
+import ProfileScreen from "./screens/Profile";
+import ReportIssueScreen from "./screens/ReportIssue";
+import type { ImageSourceType } from "./lib/image-source/types";
 
 export type InspectionMode =
   | "turnover"
   | "maintenance"
   | "owner_arrival"
   | "vacancy_check";
+
+export interface SummaryFindingData {
+  id: string;
+  description: string;
+  severity: string;
+  confidence: number;
+  category: string;
+  roomName: string;
+  status?: string;
+  source?: "manual_note" | "ai";
+  resultId?: string;
+  findingIndex?: number;
+}
 
 export interface SummaryRoomData {
   roomId: string;
@@ -28,14 +45,7 @@ export interface SummaryRoomData {
   anglesScanned: number;
   anglesTotal: number;
   confirmedFindings: number;
-  findings: Array<{
-    id: string;
-    description: string;
-    severity: string;
-    confidence: number;
-    category: string;
-    status: string;
-  }>;
+  findings: SummaryFindingData[];
 }
 
 export interface SummaryData {
@@ -45,26 +55,23 @@ export interface SummaryData {
   durationMs: number;
   inspectionMode: string;
   rooms: SummaryRoomData[];
-  confirmedFindings: Array<{
-    id: string;
-    description: string;
-    severity: string;
-    confidence: number;
-    category: string;
-    roomName: string;
-  }>;
+  confirmedFindings: SummaryFindingData[];
 }
 
 export type RootStackParamList = {
   Login: undefined;
   Properties: undefined;
+  Profile: undefined;
+  ReportIssue: { prefillError?: string; prefillScreen?: string } | undefined;
   PropertyDetail: { propertyId: string };
+  InspectionHistory: { propertyId: string; propertyName?: string };
   PropertyTraining: { propertyId: string; propertyName: string };
   InspectionStart: { propertyId: string };
   InspectionCamera: {
     inspectionId: string;
     propertyId: string;
     inspectionMode: InspectionMode;
+    imageSource?: ImageSourceType;
   };
   InspectionSummary: {
     inspectionId: string;
@@ -125,6 +132,10 @@ export default function Navigation() {
               component={PropertyDetailScreen}
             />
             <Stack.Screen
+              name="InspectionHistory"
+              component={InspectionHistoryScreen}
+            />
+            <Stack.Screen
               name="PropertyTraining"
               component={PropertyTrainingScreen}
             />
@@ -141,6 +152,8 @@ export default function Navigation() {
               name="InspectionSummary"
               component={InspectionSummaryScreen}
             />
+            <Stack.Screen name="Profile" component={ProfileScreen} />
+            <Stack.Screen name="ReportIssue" component={ReportIssueScreen} />
           </>
         ) : (
           <Stack.Screen name="Login" component={LoginScreen} />

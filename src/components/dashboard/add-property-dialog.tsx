@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
@@ -28,7 +28,16 @@ export function AddPropertyDialog({
 }: AddPropertyDialogProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const formRef = useRef<HTMLFormElement>(null);
   const router = useRouter();
+
+  // Reset form and error when dialog opens
+  useEffect(() => {
+    if (open) {
+      setError(null);
+      formRef.current?.reset();
+    }
+  }, [open]);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -38,7 +47,8 @@ export function AddPropertyDialog({
     const formData = new FormData(e.currentTarget);
     const data = {
       name: formData.get("name") as string,
-      notes: formData.get("notes") as string,
+      address: (formData.get("address") as string) || null,
+      notes: (formData.get("notes") as string) || null,
     };
 
     try {
@@ -50,8 +60,14 @@ export function AddPropertyDialog({
       });
 
       if (!res.ok) {
-        const errBody = await res.text();
-        throw new Error(errBody || "Failed to create property");
+        let errorMessage = "Failed to create property";
+        try {
+          const errJson = await res.json();
+          errorMessage = errJson.error || errorMessage;
+        } catch {
+          // Non-JSON response, use generic message
+        }
+        throw new Error(errorMessage);
       }
 
       const property = await res.json();
@@ -66,10 +82,7 @@ export function AddPropertyDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={(isOpen) => {
-      if (isOpen) setError(null);
-      onOpenChange(isOpen);
-    }}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
           <DialogTitle>New Property</DialogTitle>
@@ -77,7 +90,7 @@ export function AddPropertyDialog({
             Name your property, then upload photos to train the AI.
           </DialogDescription>
         </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form ref={formRef} onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="name">Property Name *</Label>
             <Input
@@ -85,6 +98,15 @@ export function AddPropertyDialog({
               name="name"
               placeholder="e.g. Beach House, Mountain Cabin"
               required
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="address">Address</Label>
+            <Input
+              id="address"
+              name="address"
+              placeholder="e.g. 123 Ocean Drive, Malibu"
             />
           </div>
 

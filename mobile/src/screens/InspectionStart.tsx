@@ -13,6 +13,8 @@ import type { RouteProp } from "@react-navigation/native";
 import { createInspection } from "../lib/api";
 import type { RootStackParamList, InspectionMode } from "../navigation";
 import { colors, radius, shadows } from '../lib/tokens';
+import DevicePicker from "../components/DevicePicker";
+import type { ImageSourceType } from "../lib/image-source/types";
 
 type Nav = NativeStackNavigationProp<RootStackParamList, "InspectionStart">;
 type Route = RouteProp<RootStackParamList, "InspectionStart">;
@@ -36,21 +38,21 @@ const MODES: {
     label: "Maintenance",
     description: "Issue-specific inspection. Focus on repairs and known problems.",
     icon: "M",
-    color: "#eab308",
+    color: colors.warning,
   },
   {
     key: "owner_arrival",
     label: "Owner Arrival",
     description: "Premium readiness check. Elevated presentation and staging standards.",
     icon: "O",
-    color: "#a855f7",
+    color: colors.purple,
   },
   {
     key: "vacancy_check",
     label: "Vacancy Check",
     description: "Monitor empty property. High tolerance for dust and minor environmental wear.",
     icon: "V",
-    color: "#06b6d4",
+    color: colors.cyan,
   },
 ];
 
@@ -60,6 +62,7 @@ export default function InspectionStartScreen() {
   const { propertyId } = route.params;
 
   const [selectedMode, setSelectedMode] = useState<InspectionMode>("turnover");
+  const [selectedSource, setSelectedSource] = useState<ImageSourceType>("camera");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -73,6 +76,7 @@ export default function InspectionStartScreen() {
         inspectionId: inspection.id,
         propertyId,
         inspectionMode: selectedMode,
+        imageSource: selectedSource,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to start inspection");
@@ -94,9 +98,22 @@ export default function InspectionStartScreen() {
       <Text style={styles.title}>Start Inspection</Text>
       <Text style={styles.subtitle}>Select inspection mode</Text>
 
+      <DevicePicker selected={selectedSource} onSelect={setSelectedSource} />
+
       {error && (
         <View style={styles.errorContainer}>
           <Text style={styles.errorText}>{error}</Text>
+          <TouchableOpacity
+            onPress={() =>
+              navigation.navigate("ReportIssue", {
+                prefillError: error,
+                prefillScreen: "InspectionStart",
+              })
+            }
+            style={{ marginTop: 8 }}
+          >
+            <Text style={styles.errorReportLink}>Report this issue</Text>
+          </TouchableOpacity>
         </View>
       )}
 
@@ -233,9 +250,15 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   errorText: {
-    color: "#f87171",
+    color: colors.error,
     fontSize: 14,
     fontWeight: "500",
+  },
+  errorReportLink: {
+    color: colors.error,
+    fontSize: 13,
+    fontWeight: "600",
+    textDecorationLine: "underline" as const,
   },
   modes: {
     gap: 10,
@@ -288,7 +311,7 @@ const styles = StyleSheet.create({
     height: 22,
     borderRadius: 11,
     borderWidth: 2,
-    borderColor: "#334155",
+    borderColor: colors.slate700,
     justifyContent: "center",
     alignItems: "center",
     marginLeft: 4,

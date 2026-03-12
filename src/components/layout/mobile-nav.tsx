@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Home, ClipboardCheck, User, Plus } from "lucide-react";
 
 const navItems = [
-  { href: "/dashboard", label: "Home", icon: Home },
+  { href: "/dashboard", label: "Properties", icon: Home },
   { href: "/dashboard?tab=inspections", label: "Inspections", icon: ClipboardCheck },
   { href: "/dashboard?tab=profile", label: "Profile", icon: User },
 ];
@@ -31,7 +31,7 @@ export function MobileNav({ onAddProperty }: MobileNavProps) {
   return (
     <div className="lg:hidden fixed bottom-0 left-0 right-0 z-50">
       {/* Blur backdrop */}
-      <div className="absolute inset-0 bg-white/80 backdrop-blur-xl border-t border-stone/30" />
+      <div className="absolute inset-0 bg-background/80 backdrop-blur-xl border-t border-border" />
 
       <nav className="relative flex items-center justify-around px-2 pb-[env(safe-area-inset-bottom)] h-16">
         {navItems.map((item) => {
@@ -41,7 +41,7 @@ export function MobileNav({ onAddProperty }: MobileNavProps) {
             <Link
               key={item.href}
               href={item.href}
-              className={`flex flex-col items-center gap-0.5 px-4 py-1.5 rounded-xl transition-colors ${
+              className={`flex flex-col items-center gap-0.5 px-4 py-1.5 rounded-xl transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${
                 active
                   ? "text-primary"
                   : "text-muted-foreground"
@@ -59,7 +59,7 @@ export function MobileNav({ onAddProperty }: MobileNavProps) {
         {onAddProperty && (
           <button
             onClick={onAddProperty}
-            className="flex flex-col items-center gap-0.5 px-4 py-1.5"
+            className="flex flex-col items-center gap-0.5 px-4 py-1.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary rounded-xl"
           >
             <div className="p-1.5 rounded-xl bg-primary text-primary-foreground shadow-lg shadow-primary/25">
               <Plus className="h-5 w-5" />

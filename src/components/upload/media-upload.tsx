@@ -27,6 +27,9 @@ interface FileWithPreview {
   error?: string;
 }
 
+const MAX_FILE_SIZE_MB = 50;
+const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+
 export function MediaUpload({
   propertyId,
   onUploadComplete,
@@ -36,6 +39,7 @@ export function MediaUpload({
   const [files, setFiles] = useState<FileWithPreview[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [sizeError, setSizeError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Clean up object URLs on unmount
@@ -50,11 +54,22 @@ export function MediaUpload({
 
   const addFiles = useCallback(
     (newFiles: FileList | File[]) => {
+      setSizeError(null);
+      const fileArray = Array.from(newFiles);
+      const oversized = fileArray.filter((f) => f.size > MAX_FILE_SIZE_BYTES);
+      if (oversized.length > 0) {
+        setSizeError(
+          `${oversized.length} file${oversized.length !== 1 ? "s" : ""} exceeded ${MAX_FILE_SIZE_MB}MB limit and ${oversized.length !== 1 ? "were" : "was"} skipped.`,
+        );
+      }
+      const valid = fileArray.filter((f) => f.size <= MAX_FILE_SIZE_BYTES);
+      if (valid.length === 0) return;
+
       setFiles((prev) => {
         const remaining = maxFiles - prev.length;
         if (remaining <= 0) return prev;
-        const fileArray = Array.from(newFiles).slice(0, remaining);
-        const newFileEntries: FileWithPreview[] = fileArray.map((file) => ({
+        const sliced = valid.slice(0, remaining);
+        const newFileEntries: FileWithPreview[] = sliced.map((file) => ({
           file,
           preview: file.type.startsWith("image/")
             ? URL.createObjectURL(file)
@@ -216,6 +231,11 @@ export function MediaUpload({
           </div>
         </div>
       </div>
+
+      {/* Size error */}
+      {sizeError && (
+        <p className="text-xs text-destructive">{sizeError}</p>
+      )}
 
       {/* File previews */}
       {files.length > 0 && (

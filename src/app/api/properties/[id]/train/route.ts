@@ -9,8 +9,34 @@ import {
   baselineImages,
   baselineVersions,
 } from "@/server/schema";
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and, inArray, ne } from "drizzle-orm";
 import { emitEventSafe } from "@/lib/events/emit";
+import { generateEmbedding, getModelVersion } from "@/lib/vision/embeddings";
+import { computeQualityScore } from "@/lib/vision/quality";
+import { dedupeNearDuplicateImages } from "@/lib/vision/keyframe-dedupe";
+
+const KEYFRAME_DEDUPE_MIN_IMAGES = 4;
+const KEYFRAME_DEDUPE_MIN_KEEP = 3;
+
+type RoomAnalysis = {
+  name?: string;
+  room_type?: string;
+  roomType?: string;
+  description?: string;
+  image_urls?: string[];
+  imageUrls?: string[];
+  items?: Array<{
+    name?: unknown;
+    category?: unknown;
+    description?: unknown;
+    condition?: unknown;
+    importance?: unknown;
+  }>;
+};
+
+type PropertyAnalysis = {
+  rooms: RoomAnalysis[];
+};
 
 // POST /api/properties/[id]/train - Analyze uploaded media with AI
 export async function POST(
@@ -93,25 +119,73 @@ export async function POST(
     );
   }
 
-  // Mark property as training
-  await db
+  // Mark property as training — optimistic lock prevents concurrent runs
+  const [trainingLock] = await db
     .update(properties)
     .set({ trainingStatus: "training", updatedAt: new Date() })
-    .where(eq(properties.id, id));
+    .where(
+      and(
+        eq(properties.id, id),
+        ne(properties.trainingStatus, "training"),
+      ),
+    )
+    .returning({ id: properties.id });
+
+  if (!trainingLock) {
+    return NextResponse.json(
+      { error: "Training is already in progress for this property" },
+      { status: 409 },
+    );
+  }
 
   try {
-    const imageUrls = uploads
+    const rawImageUrls = uploads
       .filter((u) => u.fileType.startsWith("image/"))
       .map((u) => u.fileUrl);
+    const videoUploadCount = uploads.filter((u) =>
+      u.fileType.startsWith("video/")
+    ).length;
 
-    if (imageUrls.length === 0) {
+    if (rawImageUrls.length === 0) {
       throw new Error(
-        "No image files found in uploads. Please upload at least one image.",
+        videoUploadCount > 0
+          ? "No photo/keyframe frames found. Videos were uploaded, but training needs image frames."
+          : "No image files found in uploads. Please upload at least one image.",
       );
     }
 
+    const dedupeEnabled = rawImageUrls.length >= KEYFRAME_DEDUPE_MIN_IMAGES;
+    let imageUrls = [...rawImageUrls];
+    let dedupeSummary = {
+      enabled: dedupeEnabled,
+      inputCount: rawImageUrls.length,
+      keptCount: rawImageUrls.length,
+      droppedCount: 0,
+      hashedCount: 0,
+      hashFailureCount: 0,
+    };
+
+    if (dedupeEnabled) {
+      const dedupeResult = await dedupeNearDuplicateImages(rawImageUrls);
+      imageUrls = ensureMinimumFrameSet(
+        dedupeResult.keptUrls,
+        rawImageUrls,
+        KEYFRAME_DEDUPE_MIN_KEEP,
+      );
+      dedupeSummary = {
+        enabled: true,
+        inputCount: rawImageUrls.length,
+        keptCount: imageUrls.length,
+        droppedCount: Math.max(0, rawImageUrls.length - imageUrls.length),
+        hashedCount: dedupeResult.hashedCount,
+        hashFailureCount: dedupeResult.hashFailureCount,
+      };
+      console.info("[train] keyframe dedupe summary:", dedupeSummary);
+    }
+
     // Analyze images with Claude Vision API directly
-    const analysis = await analyzePropertyImages(imageUrls, property.name);
+    const rawAnalysis = await analyzePropertyImages(imageUrls, property.name);
+    const analysis = normalizeAnalysis(rawAnalysis, imageUrls);
 
     // Create rooms and items from AI analysis
     const createdRooms = [];
@@ -130,8 +204,9 @@ export async function POST(
       const roomDescription = typeof roomData.description === "string"
         ? roomData.description.slice(0, 500)
         : null;
-      const roomType = typeof (roomData.room_type || roomData.roomType) === "string"
-        ? (roomData.room_type || roomData.roomType).slice(0, 50)
+      const rawRoomType = roomData.room_type || roomData.roomType;
+      const roomType = typeof rawRoomType === "string"
+        ? rawRoomType.slice(0, 50)
         : null;
 
       // Create room
@@ -180,12 +255,17 @@ export async function POST(
       }
 
       // Assign baseline images to this room
-      const roomImageUrls = roomData.image_urls || roomData.imageUrls || [];
+      const roomImageUrls = Array.isArray(roomData.image_urls)
+        ? roomData.image_urls
+        : Array.isArray(roomData.imageUrls)
+          ? roomData.imageUrls
+          : [];
       let baselineCount = 0;
 
       for (const imgUrl of roomImageUrls) {
-        // Only insert valid string URLs from AI response
+        // Only insert valid, safe string URLs from AI response
         if (typeof imgUrl !== "string" || !imgUrl.trim()) continue;
+        if (!isSafeUrl(imgUrl)) continue;
         await db.insert(baselineImages).values({
           roomId: newRoom.id,
           imageUrl: imgUrl,
@@ -252,9 +332,9 @@ export async function POST(
     for (const bl of allPropertyBaselines) {
       allBaselineIds.push(bl.id);
 
-      // Generate placeholder embedding + quality score
-      const embedding = generatePlaceholderEmbedding(bl.imageUrl);
-      const qualityScore = 150 + Math.random() * 100;
+      // Generate embedding + quality score (real ONNX if model available, placeholder otherwise)
+      const embedding = await generateEmbedding(bl.imageUrl);
+      const qualityScore = await computeQualityScore(bl.imageUrl);
 
       await db
         .update(baselineImages)
@@ -262,7 +342,7 @@ export async function POST(
           baselineVersionId: baselineVersion.id,
           embedding,
           qualityScore,
-          embeddingModelVersion: "mobileclip-s0-placeholder-v1",
+          embeddingModelVersion: getModelVersion(),
         })
         .where(eq(baselineImages.id, bl.id));
     }
@@ -315,6 +395,12 @@ export async function POST(
       rooms: createdRooms,
       totalRooms: createdRooms.length,
       totalItems,
+      dedupe: dedupeSummary,
+      mediaSummary: {
+        uploadedImages: rawImageUrls.length,
+        uploadedVideos: videoUploadCount,
+        analyzedFrames: imageUrls.length,
+      },
       baselineVersion: {
         id: baselineVersion.id,
         versionNumber: 1,
@@ -353,7 +439,7 @@ export async function POST(
 async function analyzePropertyImages(
   imageUrls: string[],
   propertyName: string,
-): Promise<{ rooms: any[] }> {
+): Promise<PropertyAnalysis> {
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
 
   if (!anthropicKey) {
@@ -385,8 +471,8 @@ async function analyzePropertyImages(
             data: base64,
           },
         });
-      } catch {
-        // Skip images that fail to fetch
+      } catch (fetchErr) {
+        console.warn("[train] Skipping image that failed to fetch:", fetchErr instanceof Error ? fetchErr.message : fetchErr);
       }
     }
 
@@ -464,47 +550,160 @@ Analyze all images and group them by room. Be thorough — identify every signif
       }
       return generateBasicStructure(imageUrls);
     }
-  } catch {
+  } catch (aiErr) {
+    console.warn("[train] Claude API call failed, falling back to basic structure:", aiErr instanceof Error ? aiErr.message : aiErr);
     return generateBasicStructure(imageUrls);
   }
 }
 
-/**
- * Generate a deterministic 512-dim placeholder embedding from an image URL.
- * Phase 2: Replace with actual MobileCLIP-S0 ONNX inference.
- */
-function generatePlaceholderEmbedding(imageUrl: string): number[] {
-  const embedding = new Array(512);
-  let hash = 0;
-  for (let i = 0; i < imageUrl.length; i++) {
-    const char = imageUrl.charCodeAt(i);
-    hash = ((hash << 5) - hash + char) | 0;
+// Embedding generation and quality scoring are now in shared modules:
+// - @/lib/vision/embeddings (generateEmbedding, getModelVersion)
+// - @/lib/vision/quality (computeQualityScore)
+
+function generateBasicStructure(imageUrls: string[]): PropertyAnalysis {
+  if (imageUrls.length === 0) {
+    return { rooms: [] };
   }
-  for (let i = 0; i < 512; i++) {
-    hash = ((hash << 13) ^ hash) | 0;
-    hash = (hash * 0x5bd1e995) | 0;
-    hash = ((hash >> 15) ^ hash) | 0;
-    embedding[i] = (hash & 0xffff) / 0xffff - 0.5;
-  }
-  let norm = 0;
-  for (let i = 0; i < 512; i++) {
-    norm += embedding[i] * embedding[i];
-  }
-  norm = Math.sqrt(norm);
-  for (let i = 0; i < 512; i++) {
-    embedding[i] = embedding[i] / norm;
-  }
-  return embedding;
+
+  return {
+    rooms: [
+      {
+        name: "Primary Room",
+        room_type: "other",
+        description: "Fallback room grouping used (manual review recommended)",
+        image_urls: [...imageUrls],
+        items: [],
+      },
+    ],
+  };
 }
 
-function generateBasicStructure(imageUrls: string[]): { rooms: any[] } {
-  const rooms = imageUrls.map((url, i) => ({
-    name: `Room ${i + 1}`,
-    room_type: "other",
-    description: "Auto-detected room (manual review recommended)",
-    image_urls: [url],
-    items: [],
-  }));
+function normalizeAnalysis(
+  analysis: PropertyAnalysis,
+  imageUrls: string[],
+): PropertyAnalysis {
+  const rooms = Array.isArray(analysis?.rooms) ? analysis.rooms : [];
+  if (rooms.length === 0) {
+    return generateBasicStructure(imageUrls);
+  }
 
-  return { rooms };
+  const mergedByName = new Map<string, RoomAnalysis>();
+  const unnamedRooms: RoomAnalysis[] = [];
+
+  for (const room of rooms) {
+    const roomName =
+      typeof room?.name === "string" && room.name.trim()
+        ? room.name.trim()
+        : "";
+    const roomImages = getRoomImageUrls(room);
+    const roomItems = Array.isArray(room.items) ? room.items : [];
+
+    if (!roomName) {
+      unnamedRooms.push({
+        ...room,
+        image_urls: roomImages,
+        imageUrls: undefined,
+        items: roomItems,
+      });
+      continue;
+    }
+
+    const key = roomName.toLowerCase();
+    const existing = mergedByName.get(key);
+    if (!existing) {
+      mergedByName.set(key, {
+        ...room,
+        name: roomName,
+        image_urls: roomImages,
+        imageUrls: undefined,
+        items: roomItems,
+      });
+      continue;
+    }
+
+    existing.image_urls = [
+      ...new Set([...getRoomImageUrls(existing), ...roomImages]),
+    ];
+    existing.imageUrls = undefined;
+    existing.items = [
+      ...(Array.isArray(existing.items) ? existing.items : []),
+      ...roomItems,
+    ];
+
+    const existingType =
+      (typeof existing.room_type === "string" && existing.room_type) ||
+      (typeof existing.roomType === "string" && existing.roomType) ||
+      "";
+    const incomingType =
+      (typeof room.room_type === "string" && room.room_type) ||
+      (typeof room.roomType === "string" && room.roomType) ||
+      "";
+    if ((!existingType || existingType === "other") && incomingType) {
+      existing.room_type = incomingType;
+      existing.roomType = undefined;
+    }
+
+    if (
+      (!existing.description || !existing.description.trim()) &&
+      typeof room.description === "string"
+    ) {
+      existing.description = room.description;
+    }
+  }
+
+  const normalizedRooms = [...mergedByName.values(), ...unnamedRooms];
+  if (normalizedRooms.length === 0) {
+    return generateBasicStructure(imageUrls);
+  }
+
+  const hasOnlyGenericNames = normalizedRooms.every((room, idx) => {
+    const name =
+      typeof room?.name === "string" && room.name.trim()
+        ? room.name.trim()
+        : `Room ${idx + 1}`;
+    return /^room\s*\d+$/i.test(name) || /^area\s*\d+$/i.test(name);
+  });
+
+  if (hasOnlyGenericNames && normalizedRooms.length > 1) {
+    return generateBasicStructure(imageUrls);
+  }
+
+  return { rooms: normalizedRooms };
+}
+
+function getRoomImageUrls(room: RoomAnalysis): string[] {
+  const imageUrls = [
+    ...(Array.isArray(room.image_urls) ? room.image_urls : []),
+    ...(Array.isArray(room.imageUrls) ? room.imageUrls : []),
+  ];
+  return [
+    ...new Set(
+      imageUrls.filter(
+        (url): url is string => typeof url === "string" && url.trim().length > 0,
+      ),
+    ),
+  ];
+}
+
+function ensureMinimumFrameSet(
+  dedupedUrls: string[],
+  originalUrls: string[],
+  minimumKeep: number,
+): string[] {
+  const targetCount = Math.min(minimumKeep, originalUrls.length);
+  if (dedupedUrls.length >= targetCount) {
+    return dedupedUrls;
+  }
+
+  const expanded = [...dedupedUrls];
+  const seen = new Set(expanded);
+
+  for (const url of originalUrls) {
+    if (expanded.length >= targetCount) break;
+    if (seen.has(url)) continue;
+    expanded.push(url);
+    seen.add(url);
+  }
+
+  return expanded;
 }

@@ -34,6 +34,16 @@ export const colors = {
   error: '#F87171',
   info: '#4DA6FF',
 
+  // ── Severity / Category ───────────────
+  purple: '#A855F7',           // Guest damage, special category
+  cyan: '#06B6D4',             // Vacancy check accent
+
+  // ── Slate Scale (dark context text) ────
+  slate300: '#94A3B8',         // Muted text on dark backgrounds
+  slate500: '#64748B',         // Cosmetic severity
+  slate600: '#475569',         // Subdued labels on dark backgrounds
+  slate700: '#334155',         // Placeholders, dark borders
+
   // ── Camera Context (stays dark) ─────────
   camera: {
     background: '#000000',

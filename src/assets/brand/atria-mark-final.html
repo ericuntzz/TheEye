@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Atria — Final Mark</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --navy:  #1B2A4A;
+    --sky:   #4DA6FF;
+    --ivory: #F8F7F4;
+    --stone: #D4C8B8;
+    --slate: #6B7280;
+    --mid:   #9CA3AF;
+    --dark:  #0F1115;
+    --white: #FFFFFF;
+  }
+  body {
+    background: var(--ivory);
+    font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif;
+    color: var(--navy);
+    padding: 80px 48px 112px;
+    max-width: 1080px;
+    margin: 0 auto;
+  }
+
+  .eyebrow { font-size:10px; letter-spacing:0.22em; color:var(--mid); font-weight:600; margin-bottom:10px; }
+  .title   { font-size:28px; font-weight:700; color:var(--navy); letter-spacing:-0.02em; margin-bottom:8px; line-height:1.2; }
+  .subtitle{ font-size:14px; color:var(--slate); line-height:1.7; max-width:600px; }
+  hr.rule  { border:none; border-top:1px solid var(--stone); margin:64px 0; }
+
+  /* ── Section label ── */
+  .section-head { margin-bottom:28px; }
+
+  /* ── Hero ── */
+  .hero-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-top: 32px;
+  }
+  .hero-card {
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 80px 40px;
+  }
+  .hc-light { background: var(--white); border: 1px solid #E5E0D9; }
+  .hc-navy  { background: var(--navy); }
+  .hc-ivory { background: var(--ivory); border: 1px solid #E5E0D9; }
+  .hc-dark  { background: var(--dark); }
+
+  /* ── Scale ── */
+  .scale-row  { display:flex; align-items:flex-end; gap:48px; flex-wrap:wrap; margin-top:32px; }
+  .scale-item { display:flex; flex-direction:column; align-items:center; gap:12px; }
+  .scale-label{ font-size:10px; letter-spacing:0.1em; color:var(--mid); font-weight:500; }
+
+  /* ── Variants ── */
+  .variant-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-top:32px; }
+  .v-card { border-radius:12px; padding:40px 16px 24px; display:flex; flex-direction:column; align-items:center; gap:16px; }
+  .v-iv { background:var(--ivory); border:1px solid #E5E0D9; }
+  .v-wh { background:var(--white); border:1px solid #E5E0D9; }
+  .v-nv { background:var(--navy); }
+  .v-dk { background:var(--dark); }
+  .v-label { font-size:9px; letter-spacing:0.16em; font-weight:600; }
+  .v-iv .v-label, .v-wh .v-label { color:var(--mid); }
+  .v-nv .v-label, .v-dk .v-label { color:rgba(255,255,255,0.28); }
+
+  /* ── Lockups ── */
+  .lockup-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:32px; }
+  .l-card { border-radius:12px; padding:44px 48px; display:flex; align-items:center; gap:24px; }
+  .l-iv { background:var(--ivory); border:1px solid #E5E0D9; }
+  .l-wh { background:var(--white); border:1px solid #E5E0D9; }
+  .l-nv { background:var(--navy); }
+  .l-dk { background:var(--dark); }
+  .wordmark { font-size:28px; font-weight:700; letter-spacing:0.26em; line-height:1; }
+  .l-iv .wordmark, .l-wh .wordmark { color:var(--navy); }
+  .l-nv .wordmark, .l-dk .wordmark { color:var(--white); }
+
+  /* ── Stacked lockup ── */
+  .stacked { flex-direction:column; gap:14px; padding:44px 32px; }
+  .stacked .wordmark { font-size:20px; }
+
+  /* ── App icons ── */
+  .icon-row  { display:flex; align-items:flex-end; gap:32px; flex-wrap:wrap; margin-top:32px; }
+  .icon-item { display:flex; flex-direction:column; align-items:center; gap:12px; }
+  .app-icon  {
+    display:flex; align-items:center; justify-content:center;
+    position:relative; overflow:hidden; flex-shrink:0;
+    background:
+      radial-gradient(ellipse 65% 60% at 50% 35%,
+        rgba(93,179,255,0.50) 0%,
+        rgba(60,120,220,0.20) 50%,
+        transparent 100%),
+      #1B2A4A;
+  }
+  .app-glow { display:none; }
+
+  /* ── SVG spec callout ── */
+  .spec-box {
+    background: var(--dark);
+    border-radius: 12px;
+    padding: 36px 40px;
+    margin-top: 32px;
+  }
+  .spec-box pre {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 11.5px;
+    line-height: 1.9;
+    color: rgba(255,255,255,0.75);
+    white-space: pre-wrap;
+  }
+  .spec-box .k { color: #4DA6FF; }
+  .spec-box .v { color: #8B8CFF; }
+  .spec-box .c { color: rgba(255,255,255,0.3); font-style:italic; }
+
+  /* ── Anatomy ── */
+  .anatomy-card {
+    background: var(--white);
+    border: 1px solid #E5E0D9;
+    border-radius: 16px;
+    padding: 56px 48px;
+    display: flex;
+    gap: 56px;
+    align-items: center;
+    margin-top: 32px;
+    flex-wrap: wrap;
+  }
+  .anatomy-notes { flex:1; min-width:200px; display:flex; flex-direction:column; gap:24px; }
+  .an-tag  { font-size:9px; letter-spacing:0.18em; font-weight:700; color:var(--sky); margin-bottom:5px; }
+  .an-body { font-size:12px; color:var(--slate); line-height:1.7; }
+
+  .footer {
+    text-align:center; font-size:10px; letter-spacing:0.1em;
+    color:var(--stone); margin-top:80px;
+  }
+
+  @media(max-width:660px){
+    body { padding:48px 24px 72px; }
+    .hero-row, .lockup-grid { grid-template-columns:1fr; }
+    .variant-grid { grid-template-columns:1fr 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ── SYMBOL DEFS ─────────────────────────────────── -->
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <!--
+      ATRIA MARK — FINAL v1.1
+      ViewBox: -8 0 216 212
+      Construction:
+        • Outer apex cap:  (85,4)→(91,4) — 6px flat top, no split peak
+        • Inner apex:      (88, 20) — counter opens here (12px solid wedge)
+        • Left leg:        thin, straight faces
+        • Right leg:       thick, outer Q(121.6,97.4), inner Q(82.3,108.2)
+        • Bracket serifs:  four tangent-matched concave curves
+        • Crossbar:        y106→120 (raised 10 units from previous)
+        • Fill rule:       nonzero (figure-8 trace, single path)
+    -->
+
+    <symbol id="M-navy" viewBox="-8 0 216 212">
+      <path fill-rule="nonzero" fill="#1B2A4A" d="
+        M 85,5
+        L 9.6,185.8
+        Q 6,194 -4,194
+        L -4,201
+        L 33,201
+        L 33,194
+        L 31,194
+        Q 22,194 25,185.5
+        L 88,20
+        Q 82.3,108.2 125.7,186.1
+        Q 130,194 121,194
+        L 119,201
+        L 201,201
+        L 201,194
+        Q 190,194 184.7,186.7
+        Q 121.6,97.4 91,5
+        Q 88,2 85,5
+        Z
+      "/>
+      <path fill="#1B2A4A" d="M 41.6,109.1 L 94.0,102.9 L 97.4,116.9 L 35.7,123.1 Z"/>
+    </symbol>
+
+    <symbol id="M-white" viewBox="-8 0 216 212">
+      <path fill-rule="nonzero" fill="white" d="
+        M 85,5
+        L 9.6,185.8
+        Q 6,194 -4,194
+        L -4,201
+        L 33,201
+        L 33,194
+        L 31,194
+        Q 22,194 25,185.5
+        L 88,20
+        Q 82.3,108.2 125.7,186.1
+        Q 130,194 121,194
+        L 119,201
+        L 201,201
+        L 201,194
+        Q 190,194 184.7,186.7
+        Q 121.6,97.4 91,5
+        Q 88,2 85,5
+        Z
+      "/>
+      <path fill="white" d="M 41.6,109.1 L 94.0,102.9 L 97.4,116.9 L 35.7,123.1 Z"/>
+    </symbol>
+
+    <symbol id="M-sky" viewBox="-8 0 216 212">
+      <path fill-rule="nonzero" fill="#4DA6FF" d="
+        M 85,5
+        L 9.6,185.8
+        Q 6,194 -4,194
+        L -4,201
+        L 33,201
+        L 33,194
+        L 31,194
+        Q 22,194 25,185.5
+        L 88,20
+        Q 82.3,108.2 125.7,186.1
+        Q 130,194 121,194
+        L 119,201
+        L 201,201
+        L 201,194
+        Q 190,194 184.7,186.7
+        Q 121.6,97.4 91,5
+        Q 88,2 85,5
+        Z
+      "/>
+      <path fill="#4DA6FF" d="M 41.6,109.1 L 94.0,102.9 L 97.4,116.9 L 35.7,123.1 Z"/>
+    </symbol>
+
+    <!--
+      FAVICON VARIANT — optimised for 16–32px
+      Changes from main mark:
+        • No bracket serifs — clean straight feet survive pixel rendering
+        • Left leg thickened: outer goes to (-2,196), inner to (36,196)
+        • Crossbar heavier: y96→112
+        • Same apex cap and inner apex proportion
+    -->
+    <symbol id="M-fav-navy" viewBox="-8 0 216 212">
+      <path fill-rule="nonzero" fill="#1B2A4A" d="
+        M 85,4
+        L -2,196
+        L 36,196
+        L 88,20
+        Q 82.3,108.2 125.7,186.1
+        L 118,196
+        L 204,196
+        Q 192,186 91,4
+        L 85,4
+        Z
+      "/>
+      <path fill="#1B2A4A" d="M 44,96 L 108,96 L 112,112 L 37,112 Z"/>
+    </symbol>
+
+    <symbol id="M-fav-white" viewBox="-8 0 216 212">
+      <path fill-rule="nonzero" fill="white" d="
+        M 85,4
+        L -2,196
+        L 36,196
+        L 88,20
+        Q 82.3,108.2 125.7,186.1
+        L 118,196
+        L 204,196
+        Q 192,186 91,4
+        L 85,4
+        Z
+      "/>
+      <path fill="white" d="M 44,96 L 108,96 L 112,112 L 37,112 Z"/>
+    </symbol>
+
+  </defs>
+</svg>
+
+<!-- ══ HEADER ═══════════════════════════════════════════════ -->
+<div style="margin-bottom:80px">
+  <div class="eyebrow">ATRIA — MARK FINAL</div>
+  <div class="title">The Atrium A</div>
+  <div class="subtitle">
+    High-contrast serif A. Thin left leg, thick right leg, both faces of
+    the right leg curved inward. Bracket serifs at all four feet. Single outer
+    apex with a 12px solid wedge — the counter opens below the peak.
+    One merged path, no seams.
+  </div>
+</div>
+
+<!-- ══ 1. HERO ═══════════════════════════════════════════════ -->
+<div class="section-head">
+  <div class="eyebrow">THE MARK</div>
+  <div class="title" style="font-size:18px;margin-bottom:0">Full size on primary surfaces</div>
+</div>
+
+<div class="hero-row">
+  <div class="hero-card hc-light">
+    <svg width="220" height="225"><use href="#M-navy"/></svg>
+  </div>
+  <div class="hero-card hc-navy">
+    <svg width="220" height="225"><use href="#M-white"/></svg>
+  </div>
+  <div class="hero-card hc-ivory">
+    <svg width="220" height="225"><use href="#M-navy"/></svg>
+  </div>
+  <div class="hero-card hc-dark">
+    <svg width="220" height="225"><use href="#M-white"/></svg>
+  </div>
+</div>
+
+<hr class="rule">
+
+<!-- ══ 2. SCALE ══════════════════════════════════════════════ -->
+<div class="section-head">
+  <div class="eyebrow">SCALE</div>
+  <div class="title" style="font-size:18px;margin-bottom:4px">160px → 16px</div>
+  <div class="subtitle" style="font-size:13px">Single filled path scales perfectly. Bracket serifs read at 64px, simplify gracefully below.</div>
+</div>
+
+<div class="scale-row">
+  <div class="scale-item">
+    <svg width="160" height="160"><use href="#M-navy"/></svg>
+    <div class="scale-label">160px</div>
+  </div>
+  <div class="scale-item">
+    <svg width="96" height="96"><use href="#M-navy"/></svg>
+    <div class="scale-label">96px</div>
+  </div>
+  <div class="scale-item">
+    <svg width="64" height="64"><use href="#M-navy"/></svg>
+    <div class="scale-label">64px</div>
+  </div>
+  <div class="scale-item">
+    <svg width="40" height="40"><use href="#M-navy"/></svg>
+    <div class="scale-label">40px</div>
+  </div>
+  <div class="scale-item">
+    <svg width="24" height="24"><use href="#M-navy"/></svg>
+    <div class="scale-label">24px</div>
+  </div>
+  <div class="scale-item">
+    <svg width="16" height="16"><use href="#M-navy"/></svg>
+    <div class="scale-label">16px — favicon</div>
+  </div>
+</div>
+
+<hr class="rule">
+
+<!-- ══ 3. MONOCHROME VARIANTS ════════════════════════════════ -->
+<div class="section-head">
+  <div class="eyebrow">MONOCHROME VARIANTS</div>
+  <div class="title" style="font-size:18px;margin-bottom:4px">Required export set</div>
+  <div class="subtitle" style="font-size:13px">The mark works on every surface without modification. No gradient dependency.</div>
+</div>
+
+<div class="variant-grid">
+  <div class="v-card v-iv">
+    <svg width="96" height="96"><use href="#M-navy"/></svg>
+    <div class="v-label">NAVY / IVORY</div>
+  </div>
+  <div class="v-card v-wh">
+    <svg width="96" height="96"><use href="#M-navy"/></svg>
+    <div class="v-label">NAVY / WHITE</div>
+  </div>
+  <div class="v-card v-nv">
+    <svg width="96" height="96"><use href="#M-white"/></svg>
+    <div class="v-label">WHITE / NAVY</div>
+  </div>
+  <div class="v-card v-dk">
+    <svg width="96" height="96"><use href="#M-white"/></svg>
+    <div class="v-label">WHITE / DARK</div>
+  </div>
+</div>
+
+<hr class="rule">
+
+<!-- ══ 4. LOCKUPS ════════════════════════════════════════════ -->
+<div class="section-head">
+  <div class="eyebrow">LOCKUPS</div>
+  <div class="title" style="font-size:18px;margin-bottom:4px">Symbol + wordmark</div>
+  <div class="subtitle" style="font-size:13px">Horizontal for headers and nav. Stacked for square contexts and splash screens. Wordmark is Geist SemiBold, 0.26em tracking.</div>
+</div>
+
+<div class="lockup-grid">
+  <!-- Horizontal light -->
+  <div class="l-card l-iv">
+    <svg width="44" height="44"><use href="#M-navy"/></svg>
+    <div class="wordmark">ATRIA</div>
+  </div>
+  <!-- Horizontal dark -->
+  <div class="l-card l-nv">
+    <svg width="44" height="44"><use href="#M-white"/></svg>
+    <div class="wordmark">ATRIA</div>
+  </div>
+  <!-- Stacked light -->
+  <div class="l-card l-wh stacked">
+    <svg width="56" height="56"><use href="#M-navy"/></svg>
+    <div class="wordmark">ATRIA</div>
+  </div>
+  <!-- Stacked dark -->
+  <div class="l-card l-dk stacked">
+    <svg width="56" height="56"><use href="#M-white"/></svg>
+    <div class="wordmark">ATRIA</div>
+  </div>
+</div>
+
+<hr class="rule">
+
+<!-- ══ 5. APP ICON ═══════════════════════════════════════════ -->
+<div class="section-head">
+  <div class="eyebrow">APP ICON</div>
+  <div class="title" style="font-size:18px;margin-bottom:4px">Navy ground + sky glow</div>
+  <div class="subtitle" style="font-size:13px">The triangular counter above the crossbar receives the glow — light entering through the architectural threshold. The solid apex reads as one unified peak at every size.</div>
+</div>
+
+<div class="icon-row">
+  <!-- 1024 representative -->
+  <div class="icon-item">
+    <div class="app-icon" style="width:180px;height:180px;border-radius:40px;">
+      <div class="app-glow" style="width:130px;height:130px;"></div>
+      <svg width="112" height="112" style="position:relative;z-index:1">
+        <use href="#M-white"/>
+      </svg>
+    </div>
+    <div class="scale-label">180px — primary</div>
+  </div>
+
+  <div class="icon-item">
+    <div class="app-icon" style="width:120px;height:120px;border-radius:27px;">
+      <div class="app-glow" style="width:78px;height:78px;"></div>
+      <svg width="76" height="76" style="position:relative;z-index:1"><use href="#M-white"/></svg>
+    </div>
+    <div class="scale-label">120px</div>
+  </div>
+
+  <div class="icon-item">
+    <div class="app-icon" style="width:80px;height:80px;border-radius:18px;">
+      <div class="app-glow" style="width:52px;height:52px;"></div>
+      <svg width="50" height="50" style="position:relative;z-index:1"><use href="#M-white"/></svg>
+    </div>
+    <div class="scale-label">80px</div>
+  </div>
+
+  <div class="icon-item">
+    <div class="app-icon" style="width:60px;height:60px;border-radius:14px;">
+      <div class="app-glow" style="width:38px;height:38px;"></div>
+      <svg width="38" height="38" style="position:relative;z-index:1"><use href="#M-white"/></svg>
+    </div>
+    <div class="scale-label">60px</div>
+  </div>
+
+  <div class="icon-item">
+    <div class="app-icon" style="width:40px;height:40px;border-radius:9px;">
+      <div class="app-glow" style="width:26px;height:26px;"></div>
+      <svg width="26" height="26" style="position:relative;z-index:1"><use href="#M-white"/></svg>
+    </div>
+    <div class="scale-label">40px</div>
+  </div>
+
+  <div class="icon-item">
+    <div class="app-icon" style="width:24px;height:24px;border-radius:5px;">
+      <svg width="16" height="16" style="position:relative;z-index:1"><use href="#M-white"/></svg>
+    </div>
+    <div class="scale-label">24px</div>
+  </div>
+</div>
+
+<hr class="rule">
+
+<!-- ══ 6. ANATOMY ════════════════════════════════════════════ -->
+<div class="section-head">
+  <div class="eyebrow">ANATOMY</div>
+  <div class="title" style="font-size:18px;margin-bottom:0">Every decision has a reason</div>
+</div>
+
+<div class="anatomy-card">
+  <svg width="200" height="220" viewBox="-8 0 216 220" style="flex-shrink:0">
+    <use href="#M-navy"/>
+    <!-- Annotation lines -->
+    <line x1="-20" y1="100" x2="14"  y2="100" stroke="#4DA6FF" stroke-width="1" stroke-dasharray="3,2"/>
+    <text x="-22" y="100" font-size="9" fill="#4DA6FF" text-anchor="end" dominant-baseline="middle" font-weight="700" letter-spacing="0.08em">THIN</text>
+    <line x1="216" y1="100" x2="160" y2="100" stroke="#4DA6FF" stroke-width="1" stroke-dasharray="3,2"/>
+    <text x="218" y="100" font-size="9" fill="#4DA6FF" text-anchor="start" dominant-baseline="middle" font-weight="700" letter-spacing="0.08em">THICK</text>
+    <line x1="218" y1="75"  x2="148" y2="75"  stroke="#D4C8B8" stroke-width="1" stroke-dasharray="3,2"/>
+    <text x="220" y="75"  font-size="9" fill="#D4C8B8" text-anchor="start" dominant-baseline="middle" font-weight="600" letter-spacing="0.06em">CURVES IN</text>
+    <line x1="-20" y1="18"  x2="60"  y2="18"  stroke="#D4C8B8" stroke-width="1" stroke-dasharray="3,2"/>
+    <text x="-22" y="18"  font-size="9" fill="#D4C8B8" text-anchor="end" dominant-baseline="middle" font-weight="600" letter-spacing="0.06em">SOLID WEDGE</text>
+    <line x1="-20" y1="123" x2="40"  y2="123" stroke="#D4C8B8" stroke-width="1" stroke-dasharray="3,2"/>
+    <text x="-22" y="123" font-size="9" fill="#D4C8B8" text-anchor="end" dominant-baseline="middle" font-weight="600" letter-spacing="0.06em">CROSSBAR</text>
+    <line x1="-20" y1="200" x2="2"   y2="200" stroke="#D4C8B8" stroke-width="1" stroke-dasharray="3,2"/>
+    <text x="-22" y="200" font-size="9" fill="#D4C8B8" text-anchor="end" dominant-baseline="middle" font-weight="600" letter-spacing="0.06em">BRACKET</text>
+  </svg>
+
+  <div class="anatomy-notes">
+    <div>
+      <div class="an-tag">THIN LEFT / THICK RIGHT</div>
+      <div class="an-body">Calligraphic high-contrast. The thin stroke is the upstroke of a broad-nib pen returning to the apex. The thick stroke is the downstroke under full pressure. The asymmetry is what makes the mark feel drawn, not constructed.</div>
+    </div>
+    <div>
+      <div class="an-tag">ENTASIS — BOTH FACES CURVE</div>
+      <div class="an-body">The inner face bows 13.5px left. The outer face bows 8px left. Both faces of the right leg curve inward — like a column under load. The inner curve is deeper, preserving the calligraphic asymmetry.</div>
+    </div>
+    <div>
+      <div class="an-tag">SOLID WEDGE APEX</div>
+      <div class="an-body">The outer silhouette peaks at a single point. The counter opens 16px below it. The wedge of solid material joins both legs physically — one unified form from tip to foot.</div>
+    </div>
+    <div>
+      <div class="an-tag">BRACKET SERIFS</div>
+      <div class="an-body">Four tangent-matched concave curves at the serif joins. Each computed from the exact incoming angle of its leg. The serifs ground the mark at the base — it stands on the page rather than floating.</div>
+    </div>
+  </div>
+</div>
+
+<hr class="rule">
+
+<!-- ══ 7. SVG PATH DATA ═══════════════════════════════════════ -->
+<div class="section-head">
+  <div class="eyebrow">SVG PATH DATA</div>
+  <div class="title" style="font-size:18px;margin-bottom:4px">Production-ready coordinates</div>
+  <div class="subtitle" style="font-size:13px">Copy these paths directly into Figma or Illustrator. ViewBox: -8 0 216 212.</div>
+</div>
+
+<div class="spec-box">
+  <pre><span class="c">/* Main body — single figure-8 path, fill-rule nonzero */</span>
+<span class="k">M</span> <span class="v">85,5</span>             <span class="c">/* left end of apex cap — 1px below center */</span>
+<span class="k">L</span> <span class="v">9.6,185.8</span>   <span class="c">/* left outer face */</span>
+<span class="k">Q</span> <span class="v">6,194</span> <span class="v">-4,194</span>  <span class="c">/* left outer bracket serif */</span>
+<span class="k">L</span> <span class="v">-4,201</span> <span class="k">L</span> <span class="v">33,201</span> <span class="k">L</span> <span class="v">33,194</span>  <span class="c">/* serif foot */</span>
+<span class="k">L</span> <span class="v">31,194</span>
+<span class="k">Q</span> <span class="v">22,194</span> <span class="v">25,185.5</span>  <span class="c">/* left inner bracket serif */</span>
+<span class="k">L</span> <span class="v">88,20</span>            <span class="c">/* left inner face → inner apex (12px wedge) */</span>
+<span class="k">Q</span> <span class="v">82.3,108.2</span> <span class="v">125.7,186.1</span>  <span class="c">/* right inner bezier face */</span>
+<span class="k">Q</span> <span class="v">130,194</span> <span class="v">121,194</span>  <span class="c">/* right inner bracket serif */</span>
+<span class="k">L</span> <span class="v">119,201</span> <span class="k">L</span> <span class="v">201,201</span> <span class="k">L</span> <span class="v">201,194</span>  <span class="c">/* right serif foot */</span>
+<span class="k">Q</span> <span class="v">190,194</span> <span class="v">184.7,186.7</span>  <span class="c">/* right outer bracket serif */</span>
+<span class="k">Q</span> <span class="v">121.6,97.4</span> <span class="v">91,5</span>  <span class="c">/* right outer bezier → right end of apex cap */</span>
+<span class="k">Q</span> <span class="v">88,2</span> <span class="v">85,5</span>       <span class="c">/* apex cap — concave arch, peaks at (88,3.5), 1.5px deep */</span>
+<span class="k">Z</span>
+
+<span class="c">/* Crossbar — 5° calligraphic stress tilt, x intersects actual leg beziers */</span>
+<span class="k">M</span> <span class="v">41.6,109.1</span> <span class="k">L</span> <span class="v">94.0,102.9</span> <span class="k">L</span> <span class="v">97.4,116.9</span> <span class="k">L</span> <span class="v">35.7,123.1</span> <span class="k">Z</span>
+
+<span class="c">/* Favicon variant — no serifs, thicker left leg */</span>
+<span class="k">M</span> <span class="v">85,5</span> <span class="k">L</span> <span class="v">-2,196</span> <span class="k">L</span> <span class="v">36,196</span> <span class="k">L</span> <span class="v">88,20</span>
+<span class="k">Q</span> <span class="v">82.3,108.2</span> <span class="v">125.7,186.1</span>
+<span class="k">L</span> <span class="v">118,196</span> <span class="k">L</span> <span class="v">204,196</span> <span class="k">Q</span> <span class="v">192,186</span> <span class="v">91,5</span> <span class="k">Q</span> <span class="v">88,2</span> <span class="v">85,5</span> <span class="k">Z</span>
+<span class="k">M</span> <span class="v">44,96</span> <span class="k">L</span> <span class="v">108,96</span> <span class="k">L</span> <span class="v">112,112</span> <span class="k">L</span> <span class="v">37,112</span> <span class="k">Z</span></pre>
+</div>
+
+<hr class="rule">
+
+<!-- ══ 8. FAVICON VARIANT ════════════════════════════════════ -->
+<div class="section-head">
+  <div class="eyebrow">FAVICON VARIANT</div>
+  <div class="title" style="font-size:18px;margin-bottom:4px">Optimised for 16–32px</div>
+  <div class="subtitle" style="font-size:13px">
+    Three changes from the main mark: bracket serifs removed (too fine to render at small sizes),
+    left leg thickened so it survives non-retina screens, crossbar slightly heavier.
+    Same apex cap, same inner wedge, same right-leg curves. Silhouette reads as identical — details are just
+    robust enough to hold at pixel scale.
+  </div>
+</div>
+
+<!-- Side-by-side: main mark vs favicon variant at small sizes -->
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:32px;">
+
+  <div style="background:white;border:1px solid #E5E0D9;border-radius:14px;padding:40px 32px;">
+    <div class="eyebrow" style="margin-bottom:20px">MAIN MARK — bracket serifs</div>
+    <div style="display:flex;align-items:flex-end;gap:32px;flex-wrap:wrap;">
+      <div class="scale-item">
+        <svg width="64" height="64"><use href="#M-navy"/></svg>
+        <div class="scale-label">64px</div>
+      </div>
+      <div class="scale-item">
+        <svg width="32" height="32"><use href="#M-navy"/></svg>
+        <div class="scale-label">32px</div>
+      </div>
+      <div class="scale-item">
+        <svg width="16" height="16"><use href="#M-navy"/></svg>
+        <div class="scale-label">16px</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="background:white;border:1px solid #E5E0D9;border-radius:14px;padding:40px 32px;">
+    <div class="eyebrow" style="margin-bottom:20px;color:#4DA6FF">FAVICON VARIANT — no serifs, thicker left leg</div>
+    <div style="display:flex;align-items:flex-end;gap:32px;flex-wrap:wrap;">
+      <div class="scale-item">
+        <svg width="64" height="64"><use href="#M-fav-navy"/></svg>
+        <div class="scale-label">64px</div>
+      </div>
+      <div class="scale-item">
+        <svg width="32" height="32"><use href="#M-fav-navy"/></svg>
+        <div class="scale-label">32px</div>
+      </div>
+      <div class="scale-item">
+        <svg width="16" height="16"><use href="#M-fav-navy"/></svg>
+        <div class="scale-label">16px</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Favicon on coloured backgrounds -->
+<div style="display:flex;gap:14px;margin-top:14px;flex-wrap:wrap;">
+
+  <!-- Dark bg — most common favicon context -->
+  <div style="flex:1;min-width:180px;background:var(--dark);border-radius:14px;padding:32px;display:flex;flex-direction:column;gap:20px;">
+    <div class="eyebrow" style="color:rgba(255,255,255,0.3)">DARK BACKGROUND</div>
+    <div style="display:flex;align-items:flex-end;gap:24px;">
+      <div class="scale-item">
+        <svg width="32" height="32"><use href="#M-fav-white"/></svg>
+        <div class="scale-label" style="color:rgba(255,255,255,0.3)">32px</div>
+      </div>
+      <div class="scale-item">
+        <svg width="16" height="16"><use href="#M-fav-white"/></svg>
+        <div class="scale-label" style="color:rgba(255,255,255,0.3)">16px</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Navy bg -->
+  <div style="flex:1;min-width:180px;background:var(--navy);border-radius:14px;padding:32px;display:flex;flex-direction:column;gap:20px;">
+    <div class="eyebrow" style="color:rgba(255,255,255,0.3)">NAVY BACKGROUND</div>
+    <div style="display:flex;align-items:flex-end;gap:24px;">
+      <div class="scale-item">
+        <svg width="32" height="32"><use href="#M-fav-white"/></svg>
+        <div class="scale-label" style="color:rgba(255,255,255,0.3)">32px</div>
+      </div>
+      <div class="scale-item">
+        <svg width="16" height="16"><use href="#M-fav-white"/></svg>
+        <div class="scale-label" style="color:rgba(255,255,255,0.3)">16px</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- App icon at favicon sizes -->
+  <div style="flex:1;min-width:180px;background:white;border:1px solid #E5E0D9;border-radius:14px;padding:32px;display:flex;flex-direction:column;gap:20px;">
+    <div class="eyebrow">AS APP ICON — small</div>
+    <div style="display:flex;align-items:flex-end;gap:16px;">
+      <div class="icon-item">
+        <div class="app-icon" style="width:32px;height:32px;border-radius:7px;">
+          <svg width="20" height="20" style="position:relative;z-index:1"><use href="#M-white"/></svg>
+        </div>
+        <div class="scale-label">32px</div>
+      </div>
+      <div class="icon-item">
+        <div class="app-icon" style="width:16px;height:16px;border-radius:3px;">
+          <svg width="11" height="11" style="position:relative;z-index:1"><use href="#M-white"/></svg>
+        </div>
+        <div class="scale-label">16px</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="footer">ATRIA MARK — FINAL — VERSION 1.3 — MARCH 2026</div>
+
+</body>
+</html>

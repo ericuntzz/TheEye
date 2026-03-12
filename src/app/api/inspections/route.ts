@@ -91,15 +91,29 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Parse pagination params (default: limit 50, offset 0)
+    // Parse filters + pagination params (default: limit 50, offset 0)
     const url = request.nextUrl;
+    const propertyId = url.searchParams.get("propertyId");
     const limit = Math.min(Math.max(parseInt(url.searchParams.get("limit") || "50", 10) || 50, 1), 100);
     const offset = Math.max(parseInt(url.searchParams.get("offset") || "0", 10) || 0, 0);
+    if (propertyId && !isValidUUID(propertyId)) {
+      return NextResponse.json(
+        { error: "Invalid propertyId filter" },
+        { status: 400 },
+      );
+    }
+
+    const where = propertyId
+      ? and(
+          eq(inspections.inspectorId, dbUser.id),
+          eq(inspections.propertyId, propertyId),
+        )
+      : eq(inspections.inspectorId, dbUser.id);
 
     const userInspections = await db
       .select()
       .from(inspections)
-      .where(eq(inspections.inspectorId, dbUser.id))
+      .where(where)
       .orderBy(desc(inspections.startedAt))
       .limit(limit)
       .offset(offset);

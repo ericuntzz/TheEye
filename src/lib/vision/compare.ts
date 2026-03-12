@@ -5,6 +5,10 @@
 // ============================================================================
 
 import { isSafeUrl } from "@/lib/auth";
+import {
+  runPreflightGate,
+  type PreflightGateResult,
+} from "@/lib/vision/preflight-gate";
 
 export interface ComparisonFinding {
   category: "missing" | "moved" | "cleanliness" | "damage" | "inventory" | "operational" | "safety" | "restock" | "presentation";
@@ -19,7 +23,13 @@ export interface ComparisonFinding {
 export interface ComparisonResult {
   findings: ComparisonFinding[];
   summary: string;
-  readiness_score: number;
+  readiness_score: number | null;
+  diagnostics?: {
+    model?: string;
+    aiLatencyMs?: number;
+    skippedByPreflight?: boolean;
+    preflight?: PreflightGateResult;
+  };
 }
 
 export type InspectionMode = "turnover" | "maintenance" | "owner_arrival" | "vacancy_check";
@@ -35,14 +45,22 @@ export interface CompareImagesOptions {
   inspectionMode?: InspectionMode;
   /** Known conditions to suppress (descriptions of pre-existing issues) */
   knownConditions?: string[];
-  /** Whether images are base64 (true) or URLs (false, default) */
+  /**
+   * Legacy flag: if true, treats both baseline and current images as base64.
+   * Prefer baselineIsBase64/currentImagesAreBase64 for mixed-input flows.
+   */
   isBase64?: boolean;
+  /** Override for baseline image source format */
+  baselineIsBase64?: boolean;
+  /** Override for current image source format */
+  currentImagesAreBase64?: boolean;
 }
 
+// Failure result: null score signals "not evaluated" (never confused with a pass)
 const EMPTY_RESULT: ComparisonResult = {
   findings: [],
-  readiness_score: 100,
-  summary: "No issues detected",
+  readiness_score: null,
+  summary: "Not evaluated",
 };
 
 /**
@@ -194,18 +212,20 @@ export async function compareImages(
     inspectionMode = "turnover",
     knownConditions = [],
     isBase64 = false,
+    baselineIsBase64,
+    currentImagesAreBase64,
   } = options;
-
-  const anthropicKey = process.env.ANTHROPIC_API_KEY;
-  if (!anthropicKey) {
-    return { ...EMPTY_RESULT, summary: "AI unavailable" };
-  }
+  const baselineInputIsBase64 = baselineIsBase64 ?? isBase64;
+  const currentInputAreBase64 = currentImagesAreBase64 ?? isBase64;
 
   try {
     // Prepare baseline image
     let baselineData: { base64: string; mediaType: string };
-    if (isBase64) {
-      baselineData = { base64: baselineImage, mediaType: "image/jpeg" };
+    if (baselineInputIsBase64) {
+      baselineData = {
+        base64: stripDataUriPrefix(baselineImage),
+        mediaType: inferMediaTypeFromDataUri(baselineImage) || "image/jpeg",
+      };
     } else {
       const fetched = await fetchImageAsBase64(baselineImage);
       if (!fetched) {
@@ -217,8 +237,11 @@ export async function compareImages(
     // Prepare current image(s)
     const currentData: { base64: string; mediaType: string }[] = [];
     for (const img of currentImages) {
-      if (isBase64) {
-        currentData.push({ base64: img, mediaType: "image/jpeg" });
+      if (currentInputAreBase64) {
+        currentData.push({
+          base64: stripDataUriPrefix(img),
+          mediaType: inferMediaTypeFromDataUri(img) || "image/jpeg",
+        });
       } else {
         const fetched = await fetchImageAsBase64(img);
         if (!fetched) {
@@ -226,6 +249,37 @@ export async function compareImages(
         }
         currentData.push(fetched);
       }
+    }
+
+    // Run preflight alignment + perceptual gate on baseline vs first current frame.
+    const preflight = await runPreflightGate({
+      baselineBase64: baselineData.base64,
+      currentBase64: currentData[0].base64,
+    });
+
+    if (preflight && !preflight.shouldCallAi) {
+      return {
+        findings: [],
+        summary: "No meaningful visual change detected",
+        readiness_score: 100,
+        diagnostics: {
+          skippedByPreflight: true,
+          preflight,
+          model: "preflight-gate",
+        },
+      };
+    }
+
+    const anthropicKey = process.env.ANTHROPIC_API_KEY;
+    if (!anthropicKey) {
+      return {
+        ...EMPTY_RESULT,
+        summary: "AI unavailable",
+        diagnostics: {
+          skippedByPreflight: false,
+          preflight: preflight || undefined,
+        },
+      };
     }
 
     // Build message content
@@ -269,6 +323,8 @@ export async function compareImages(
       text: buildExpertPrompt(roomName, inspectionMode, knownConditions, currentData.length),
     });
 
+    const aiModel = process.env.ANTHROPIC_VISION_MODEL || "claude-sonnet-4-5-20250514";
+    const aiStartedAt = Date.now();
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       signal: AbortSignal.timeout(120000), // 2 minute timeout for AI comparison
@@ -278,24 +334,52 @@ export async function compareImages(
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-5-20250514",
+        model: aiModel,
         max_tokens: 4096,
         messages: [{ role: "user", content }],
       }),
     });
 
     if (!res.ok) {
-      return { ...EMPTY_RESULT, summary: "Comparison unavailable" };
+      return {
+        ...EMPTY_RESULT,
+        summary: "Comparison unavailable",
+        diagnostics: {
+          model: aiModel,
+          aiLatencyMs: Date.now() - aiStartedAt,
+          preflight: preflight || undefined,
+          skippedByPreflight: false,
+        },
+      };
     }
 
     const data = await res.json();
     const rawText = data.content?.[0]?.text;
 
     if (!rawText) {
-      return { ...EMPTY_RESULT, summary: "Empty AI response" };
+      return {
+        ...EMPTY_RESULT,
+        summary: "Empty AI response",
+        diagnostics: {
+          model: aiModel,
+          aiLatencyMs: Date.now() - aiStartedAt,
+          preflight: preflight || undefined,
+          skippedByPreflight: false,
+        },
+      };
     }
 
-    return parseComparisonResponse(rawText);
+    const parsed = parseComparisonResponse(rawText);
+    return {
+      ...parsed,
+      diagnostics: {
+        ...(parsed.diagnostics || {}),
+        model: aiModel,
+        aiLatencyMs: Date.now() - aiStartedAt,
+        preflight: preflight || undefined,
+        skippedByPreflight: false,
+      },
+    };
   } catch {
     return { ...EMPTY_RESULT, summary: "Comparison failed" };
   }
@@ -321,4 +405,19 @@ function parseComparisonResponse(rawText: string): ComparisonResult {
     }
     return { ...EMPTY_RESULT, summary: "Parse error" };
   }
+}
+
+function stripDataUriPrefix(base64OrDataUri: string): string {
+  const marker = ";base64,";
+  const markerIndex = base64OrDataUri.indexOf(marker);
+  if (markerIndex === -1) return base64OrDataUri;
+  return base64OrDataUri.slice(markerIndex + marker.length);
+}
+
+function inferMediaTypeFromDataUri(base64OrDataUri: string): string | null {
+  if (!base64OrDataUri.startsWith("data:")) return null;
+  const end = base64OrDataUri.indexOf(";");
+  if (end === -1) return null;
+  const mediaType = base64OrDataUri.slice(5, end).trim();
+  return mediaType || null;
 }

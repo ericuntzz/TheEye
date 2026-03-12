@@ -202,12 +202,10 @@ export async function POST(
       roomName: room.name,
     });
     const findings = comparisonResult.findings || [];
-    const score = comparisonResult.readiness_score ?? 100;
+    // Null score means AI was unavailable; keep it null so downstream can detect "not evaluated".
+    const aiUnavailable = comparisonResult.readiness_score === null;
+    const score = comparisonResult.readiness_score;
     const rawResponse = JSON.stringify(comparisonResult);
-
-    const hasCritical = findings.some(
-      (f) => f.severity === "urgent_repair" || f.severity === "safety" || f.severity === "guest_damage",
-    );
 
     // Store full ComparisonFinding data as JSON
     const [result] = await db
@@ -218,7 +216,7 @@ export async function POST(
         baselineImageId,
         currentImageUrl,
         status:
-          findings.length === 0 ? "passed" : hasCritical ? "flagged" : "warning",
+          aiUnavailable ? "flagged" : (findings.length === 0 ? "passed" : "flagged"),
         score,
         findings,
         rawResponse,

@@ -1,6 +1,7 @@
 "use client";
 
-import { Eye, Bell } from "lucide-react";
+import { Bell } from "lucide-react";
+import { AtriaMark } from "@/components/ui/atria-mark";
 
 interface MobileHeaderProps {
   userEmail: string;
@@ -31,12 +32,14 @@ export function MobileHeader({ userEmail, title, subtitle }: MobileHeaderProps) 
 
         {/* Right: logo + notification */}
         <div className="flex items-center gap-2">
-          <button className="relative p-2 rounded-xl bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors">
+          <button
+            aria-label="Notifications"
+            className="relative p-2 rounded-xl bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+          >
             <Bell className="h-5 w-5" />
-            <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-primary" />
           </button>
-          <div className="flex items-center justify-center h-9 w-9 rounded-xl bg-heading/10">
-            <Eye className="h-[18px] w-[18px] text-heading" />
+          <div className="flex items-center justify-center h-9 w-9">
+            <AtriaMark size={28} color="navy" />
           </div>
         </div>
       </div>

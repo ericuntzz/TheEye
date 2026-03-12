@@ -3,8 +3,16 @@ import { getDbUser, isValidUUID } from "@/lib/auth";
 import { db } from "@/server/db";
 import { baselineImages, rooms, properties } from "@/server/schema";
 import { eq, and, inArray } from "drizzle-orm";
+import {
+  generateEmbedding,
+  getModelVersion,
+  hasRealEmbeddingModel,
+} from "@/lib/vision/embeddings";
+import { computeQualityScore } from "@/lib/vision/quality";
 
 const MAX_EMBEDDINGS_PER_REQUEST = 500;
+const ALLOW_PLACEHOLDER_EMBEDDINGS =
+  process.env.ALLOW_PLACEHOLDER_EMBEDDINGS === "1";
 
 /**
  * POST /api/embeddings
@@ -33,6 +41,17 @@ export async function POST(request: NextRequest) {
   }
 
   const { imageIds, propertyId, imageUrls } = body;
+  const hasRealModel = await hasRealEmbeddingModel();
+
+  if (!hasRealModel && !ALLOW_PLACEHOLDER_EMBEDDINGS) {
+    return NextResponse.json(
+      {
+        error:
+          "Embedding model is unavailable. Provision the MobileCLIP ONNX model first (see docs/ONNX_MODEL_SETUP.md) or set ALLOW_PLACEHOLDER_EMBEDDINGS=1 for local development only.",
+      },
+      { status: 503 },
+    );
+  }
 
   // Mode 1: Generate embeddings for arbitrary image URLs (no storage)
   if (imageUrls && Array.isArray(imageUrls) && imageUrls.length > 0) {
@@ -55,7 +74,7 @@ export async function POST(request: NextRequest) {
       imageUrls.map(async (url: string) => ({
         url,
         embedding: await generateEmbedding(url),
-        modelVersion: EMBEDDING_MODEL_VERSION,
+        modelVersion: getModelVersion(),
       })),
     );
 
@@ -64,6 +83,12 @@ export async function POST(request: NextRequest) {
 
   // Mode 2: Generate embeddings for specific baseline image IDs
   if (imageIds && Array.isArray(imageIds) && imageIds.length > 0) {
+    if (imageIds.length > MAX_EMBEDDINGS_PER_REQUEST) {
+      return NextResponse.json(
+        { error: `Too many image IDs. Maximum is ${MAX_EMBEDDINGS_PER_REQUEST}` },
+        { status: 400 },
+      );
+    }
     // Validate UUIDs
     for (const id of imageIds) {
       if (typeof id !== "string" || !isValidUUID(id)) {
@@ -123,7 +148,7 @@ export async function POST(request: NextRequest) {
         .set({
           embedding,
           qualityScore,
-          embeddingModelVersion: EMBEDDING_MODEL_VERSION,
+          embeddingModelVersion: getModelVersion(),
         })
         .where(eq(baselineImages.id, image.id));
 
@@ -131,7 +156,7 @@ export async function POST(request: NextRequest) {
         id: image.id,
         embeddingDimensions: embedding.length,
         qualityScore,
-        modelVersion: EMBEDDING_MODEL_VERSION,
+        modelVersion: getModelVersion(),
       });
     }
 
@@ -213,7 +238,7 @@ export async function POST(request: NextRequest) {
         .set({
           embedding,
           qualityScore,
-          embeddingModelVersion: EMBEDDING_MODEL_VERSION,
+          embeddingModelVersion: getModelVersion(),
         })
         .where(eq(baselineImages.id, image.id));
 
@@ -221,7 +246,7 @@ export async function POST(request: NextRequest) {
         id: image.id,
         embeddingDimensions: embedding.length,
         qualityScore,
-        modelVersion: EMBEDDING_MODEL_VERSION,
+        modelVersion: getModelVersion(),
       });
     }
 
@@ -248,74 +273,6 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// ============================================================================
-// Embedding Generation
-// ============================================================================
-
-/**
- * Current embedding model version.
- * When the model changes, increment this and flag old embeddings for regeneration.
- */
-const EMBEDDING_MODEL_VERSION = "mobileclip-s0-placeholder-v1";
-
-/**
- * Generate a 512-dimensional embedding for an image.
- *
- * Phase 1: Deterministic placeholder based on image URL hash.
- * This produces consistent embeddings for the same URL, enabling
- * the full pipeline to work end-to-end while we integrate the real
- * MobileCLIP-S0 ONNX model.
- *
- * Phase 2: Replace with onnxruntime-node MobileCLIP-S0 inference.
- * The same model file must be used on both server and mobile to ensure
- * embedding consistency (cosine similarity scores depend on identical weights).
- */
-async function generateEmbedding(imageUrl: string): Promise<number[]> {
-  // Deterministic hash-based embedding from URL
-  // This ensures the same image always gets the same embedding
-  const embedding = new Array(512);
-  let hash = 0;
-  for (let i = 0; i < imageUrl.length; i++) {
-    const char = imageUrl.charCodeAt(i);
-    hash = ((hash << 5) - hash + char) | 0;
-  }
-
-  for (let i = 0; i < 512; i++) {
-    // Use a seeded pseudo-random number generator for determinism
-    hash = ((hash << 13) ^ hash) | 0;
-    hash = (hash * 0x5bd1e995) | 0;
-    hash = ((hash >> 15) ^ hash) | 0;
-    embedding[i] = (hash & 0xffff) / 0xffff - 0.5; // Normalize to [-0.5, 0.5]
-  }
-
-  // Normalize to unit vector (cosine similarity expects normalized vectors)
-  let norm = 0;
-  for (let i = 0; i < 512; i++) {
-    norm += embedding[i] * embedding[i];
-  }
-  norm = Math.sqrt(norm);
-  for (let i = 0; i < 512; i++) {
-    embedding[i] = embedding[i] / norm;
-  }
-
-  return embedding;
-}
-
-/**
- * Compute a quality score for an image (Laplacian variance for blur detection).
- *
- * Phase 1: Placeholder that returns a reasonable score.
- * Phase 2: Fetch image, apply Laplacian kernel, compute variance.
- *
- * Higher scores = sharper images. Threshold for baseline quality: ~100+
- */
-async function computeQualityScore(_imageUrl: string): Promise<number> {
-  // Placeholder: return a reasonable quality score
-  // Real implementation would:
-  // 1. Fetch the image
-  // 2. Convert to grayscale
-  // 3. Apply Laplacian kernel [[0, 1, 0], [1, -4, 1], [0, 1, 0]]
-  // 4. Compute variance of the result
-  // 5. Higher variance = sharper image
-  return 150 + Math.random() * 100; // 150-250 range (good quality)
-}
+// Embedding generation and quality scoring are now in shared modules:
+// - @/lib/vision/embeddings (generateEmbedding, getModelVersion)
+// - @/lib/vision/quality (computeQualityScore)

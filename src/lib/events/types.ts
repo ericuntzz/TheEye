@@ -136,6 +136,8 @@ export interface AngleScannedPayload {
 export interface ComparisonSentPayload {
   roomId: string;
   baselineImageId: string;
+  source?: "mobile" | "web";
+  mode?: "single" | "burst";
 }
 
 export interface ComparisonReceivedPayload {
@@ -144,6 +146,11 @@ export interface ComparisonReceivedPayload {
   findingsCount: number;
   score?: number;
   latencyMs: number;
+  skippedByPreflight?: boolean;
+  preflightReason?: string;
+  preflightSsim?: number;
+  preflightDiffPercent?: number;
+  preflightAlignmentScore?: number;
 }
 
 // ============================================================================
@@ -499,4 +506,5 @@ export interface EventMetadata {
   thermalState?: string;
   inspectionMode?: string;
   source?: string; // "mobile" | "web" | "system"
+  action?: string;
 }

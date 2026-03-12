@@ -11,6 +11,7 @@ import {
   uuid,
   date,
   index,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 // ============================================================================
@@ -125,6 +126,7 @@ export const baselineVersions = pgTable("baseline_versions", {
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => [
   index("idx_baseline_versions_property_id").on(table.propertyId),
+  uniqueIndex("uq_baseline_versions_property_version").on(table.propertyId, table.versionNumber),
 ]);
 
 export type BaselineVersion = typeof baselineVersions.$inferSelect;
@@ -333,13 +335,28 @@ export type InsertEvent = typeof events.$inferInsert;
 // ============================================================================
 
 export interface Finding {
-  category: "missing" | "moved" | "cleanliness" | "damage" | "inventory" | "operational" | "safety" | "restock" | "presentation";
+  category:
+    | "missing"
+    | "moved"
+    | "cleanliness"
+    | "damage"
+    | "inventory"
+    | "operational"
+    | "safety"
+    | "restock"
+    | "presentation"
+    | "manual_note";
   description: string;
   severity: "cosmetic" | "maintenance" | "safety" | "urgent_repair" | "guest_damage";
   confidence: number; // 0-1
   findingCategory?: "condition" | "presentation" | "restock";
   isClaimable?: boolean;
   objectClass?: "fixed" | "durable_movable" | "decorative" | "consumable";
+  id?: string;
+  source?: "manual_note" | "ai";
+  roomName?: string;
+  status?: "suggested" | "confirmed" | "dismissed";
+  createdAt?: string;
 }
 
 // ============================================================================
