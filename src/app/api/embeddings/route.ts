@@ -4,7 +4,7 @@ import { db } from "@/server/db";
 import { baselineImages, rooms, properties } from "@/server/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import {
-  generateEmbedding,
+  generateEmbeddingWithOptions,
   getModelVersion,
   hasRealEmbeddingModel,
 } from "@/lib/vision/embeddings";
@@ -18,8 +18,8 @@ const ALLOW_PLACEHOLDER_EMBEDDINGS =
  * POST /api/embeddings
  *
  * Generate and store embeddings for baseline images.
- * Phase 1 implementation uses a placeholder embedding generator.
- * Will be replaced with actual MobileCLIP-S0 ONNX inference when the model is bundled.
+ * Uses real MobileCLIP-S0 ONNX inference when available.
+ * Placeholder embeddings are allowed only when ALLOW_PLACEHOLDER_EMBEDDINGS=1.
  *
  * Body:
  *   { imageIds: string[] }             — generate embeddings for specific baseline images
@@ -73,7 +73,9 @@ export async function POST(request: NextRequest) {
     const embeddings = await Promise.all(
       imageUrls.map(async (url: string) => ({
         url,
-        embedding: await generateEmbedding(url),
+        embedding: await generateEmbeddingWithOptions(url, {
+          allowPlaceholder: ALLOW_PLACEHOLDER_EMBEDDINGS,
+        }),
         modelVersion: getModelVersion(),
       })),
     );
@@ -140,7 +142,9 @@ export async function POST(request: NextRequest) {
     // Generate and store embeddings
     const results = [];
     for (const image of images) {
-      const embedding = await generateEmbedding(image.imageUrl);
+      const embedding = await generateEmbeddingWithOptions(image.imageUrl, {
+        allowPlaceholder: ALLOW_PLACEHOLDER_EMBEDDINGS,
+      });
       const qualityScore = await computeQualityScore(image.imageUrl);
 
       await db
@@ -230,7 +234,9 @@ export async function POST(request: NextRequest) {
     // Generate and store embeddings for all
     const results = [];
     for (const image of images) {
-      const embedding = await generateEmbedding(image.imageUrl);
+      const embedding = await generateEmbeddingWithOptions(image.imageUrl, {
+        allowPlaceholder: ALLOW_PLACEHOLDER_EMBEDDINGS,
+      });
       const qualityScore = await computeQualityScore(image.imageUrl);
 
       await db
@@ -274,5 +280,5 @@ export async function POST(request: NextRequest) {
 }
 
 // Embedding generation and quality scoring are now in shared modules:
-// - @/lib/vision/embeddings (generateEmbedding, getModelVersion)
+// - @/lib/vision/embeddings (generateEmbeddingWithOptions, getModelVersion)
 // - @/lib/vision/quality (computeQualityScore)

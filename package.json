@@ -11,6 +11,7 @@
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
+    "db:baseline": "node scripts/baseline-drizzle.mjs",
     "mc:event:ci": "node scripts/emit-mission-event.mjs ci_failure \"Atria CI failure\" \"Pipeline reported failure\" high",
     "mc:event:incident": "node scripts/emit-mission-event.mjs incident \"Atria incident\" \"Runtime incident reported\" high",
     "mc:event:support": "node scripts/emit-mission-event.mjs support_ticket \"Atria support escalation\" \"Support ticket escalated from Atria\" medium",

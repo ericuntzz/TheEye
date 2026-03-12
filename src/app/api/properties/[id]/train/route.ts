@@ -11,12 +11,18 @@ import {
 } from "@/server/schema";
 import { eq, and, inArray, ne } from "drizzle-orm";
 import { emitEventSafe } from "@/lib/events/emit";
-import { generateEmbedding, getModelVersion } from "@/lib/vision/embeddings";
+import {
+  generateEmbeddingWithOptions,
+  getModelVersion,
+  hasRealEmbeddingModel,
+} from "@/lib/vision/embeddings";
 import { computeQualityScore } from "@/lib/vision/quality";
 import { dedupeNearDuplicateImages } from "@/lib/vision/keyframe-dedupe";
 
 const KEYFRAME_DEDUPE_MIN_IMAGES = 4;
 const KEYFRAME_DEDUPE_MIN_KEEP = 3;
+const ALLOW_PLACEHOLDER_EMBEDDINGS =
+  process.env.ALLOW_PLACEHOLDER_EMBEDDINGS === "1";
 
 type RoomAnalysis = {
   name?: string;
@@ -151,6 +157,17 @@ export async function POST(
         videoUploadCount > 0
           ? "No photo/keyframe frames found. Videos were uploaded, but training needs image frames."
           : "No image files found in uploads. Please upload at least one image.",
+      );
+    }
+
+    const hasRealModel = await hasRealEmbeddingModel();
+    if (!hasRealModel && !ALLOW_PLACEHOLDER_EMBEDDINGS) {
+      return NextResponse.json(
+        {
+          error:
+            "Embedding model is unavailable. Provision the MobileCLIP ONNX model first (see docs/ONNX_MODEL_SETUP.md) or set ALLOW_PLACEHOLDER_EMBEDDINGS=1 for local development only.",
+        },
+        { status: 503 },
       );
     }
 
@@ -332,8 +349,10 @@ export async function POST(
     for (const bl of allPropertyBaselines) {
       allBaselineIds.push(bl.id);
 
-      // Generate embedding + quality score (real ONNX if model available, placeholder otherwise)
-      const embedding = await generateEmbedding(bl.imageUrl);
+      // Generate embedding + quality score
+      const embedding = await generateEmbeddingWithOptions(bl.imageUrl, {
+        allowPlaceholder: ALLOW_PLACEHOLDER_EMBEDDINGS,
+      });
       const qualityScore = await computeQualityScore(bl.imageUrl);
 
       await db
@@ -557,7 +576,7 @@ Analyze all images and group them by room. Be thorough — identify every signif
 }
 
 // Embedding generation and quality scoring are now in shared modules:
-// - @/lib/vision/embeddings (generateEmbedding, getModelVersion)
+// - @/lib/vision/embeddings (generateEmbeddingWithOptions, getModelVersion)
 // - @/lib/vision/quality (computeQualityScore)
 
 function generateBasicStructure(imageUrls: string[]): PropertyAnalysis {

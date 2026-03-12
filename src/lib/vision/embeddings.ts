@@ -16,19 +16,33 @@ import { fetchImageBuffer } from "./fetch-image";
 const MODEL_PATH = join(process.cwd(), "src/lib/vision/models/mobileclip-s0.onnx");
 const EMBEDDING_DIM = 512;
 const IMAGE_SIZE = 256; // MobileCLIP-S0 input size
+export const REAL_EMBEDDING_MODEL_VERSION = "mobileclip-s0-v1";
+export const PLACEHOLDER_EMBEDDING_MODEL_VERSION = "mobileclip-s0-placeholder-v1";
 
 // Singleton state
 let onnxSession: any = null;
 let onnxLoadAttempted = false;
 let modelAvailable = false;
 
+export interface GenerateEmbeddingOptions {
+  /**
+   * Only for local development: generate deterministic placeholder vectors
+   * if the real model is unavailable.
+   */
+  allowPlaceholder?: boolean;
+}
+
 /**
  * Get the current embedding model version string.
  */
 export function getModelVersion(): string {
   return modelAvailable
-    ? "mobileclip-s0-v1"
-    : "mobileclip-s0-placeholder-v1";
+    ? REAL_EMBEDDING_MODEL_VERSION
+    : PLACEHOLDER_EMBEDDING_MODEL_VERSION;
+}
+
+export function isPlaceholderModelVersion(version: string | null | undefined): boolean {
+  return version === PLACEHOLDER_EMBEDDING_MODEL_VERSION;
 }
 
 /**
@@ -76,13 +90,26 @@ async function ensureModel(): Promise<boolean> {
  * Otherwise, returns a deterministic placeholder based on URL hash.
  */
 export async function generateEmbedding(imageUrl: string): Promise<number[]> {
+  return generateEmbeddingWithOptions(imageUrl);
+}
+
+export async function generateEmbeddingWithOptions(
+  imageUrl: string,
+  options: GenerateEmbeddingOptions = {},
+): Promise<number[]> {
   const hasModel = await ensureModel();
 
   if (hasModel && onnxSession) {
     return generateOnnxEmbedding(imageUrl);
   }
 
-  return generatePlaceholderEmbedding(imageUrl);
+  if (options.allowPlaceholder) {
+    return generatePlaceholderEmbedding(imageUrl);
+  }
+
+  throw new Error(
+    "Embedding model unavailable. Provision MobileCLIP ONNX model or enable ALLOW_PLACEHOLDER_EMBEDDINGS=1 for local development only.",
+  );
 }
 
 /**
@@ -95,8 +122,7 @@ async function generateOnnxEmbedding(imageUrl: string): Promise<number[]> {
     // Fetch and preprocess image
     const imageBuffer = await fetchImageBuffer(imageUrl);
     if (!imageBuffer) {
-      console.warn("[embeddings] Failed to fetch image, falling back to placeholder");
-      return generatePlaceholderEmbedding(imageUrl);
+      throw new Error("Failed to fetch image bytes");
     }
 
     const sharp = (await import("sharp")).default;
@@ -144,7 +170,10 @@ async function generateOnnxEmbedding(imageUrl: string): Promise<number[]> {
     return normalizeVector(embedding);
   } catch (error) {
     console.error("[embeddings] ONNX inference failed:", error);
-    return generatePlaceholderEmbedding(imageUrl);
+    throw new Error(
+      `ONNX inference failed for image: ${imageUrl.slice(0, 160)}`,
+      { cause: error as Error },
+    );
   }
 }
 

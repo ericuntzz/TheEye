@@ -9,6 +9,7 @@ import {
   propertyConditions,
 } from "@/server/schema";
 import { eq, and, inArray } from "drizzle-orm";
+import { isPlaceholderModelVersion } from "@/lib/vision/embeddings";
 
 // GET /api/inspections/[id]/baselines - Load all rooms with baseline images,
 // embeddings, items, and known conditions for inspection start
@@ -81,7 +82,11 @@ export async function GET(
     const baselinesByRoom = new Map<string, typeof allBaselines>();
     for (const bl of allBaselines) {
       const list = baselinesByRoom.get(bl.roomId) || [];
-      list.push(bl);
+      list.push(
+        isPlaceholderModelVersion(bl.embeddingModelVersion)
+          ? { ...bl, embedding: null }
+          : bl,
+      );
       baselinesByRoom.set(bl.roomId, list);
     }
 
