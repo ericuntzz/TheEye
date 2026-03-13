@@ -48,6 +48,7 @@ venv/
 
 # ONNX model files (too large for git, see docs/ONNX_MODEL_SETUP.md)
 *.onnx
+*.onnx.data
 
 # IDE
 .idea/

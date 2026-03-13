@@ -107,20 +107,6 @@ export async function PATCH(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const [inspection] = await db
-      .select()
-      .from(inspections)
-      .where(
-        and(eq(inspections.id, id), eq(inspections.inspectorId, dbUser.id)),
-      );
-
-    if (!inspection) {
-      return NextResponse.json(
-        { error: "Inspection not found" },
-        { status: 404 },
-      );
-    }
-
     let body: Record<string, unknown>;
     try {
       body = await request.json();
@@ -137,22 +123,43 @@ export async function PATCH(
       );
     }
 
-    // Only in_progress inspections can be completed or cancelled
-    if (inspection.status !== "in_progress") {
-      return NextResponse.json(
-        { error: `Cannot change status of a ${inspection.status} inspection` },
-        { status: 409 },
-      );
-    }
-
+    // Atomic status transition: only update if still in_progress (prevents race condition)
     const [updated] = await db
       .update(inspections)
       .set({
         status,
         completedAt: status === "completed" || status === "cancelled" ? new Date() : undefined,
       })
-      .where(eq(inspections.id, id))
+      .where(
+        and(
+          eq(inspections.id, id),
+          eq(inspections.inspectorId, dbUser.id),
+          eq(inspections.status, "in_progress"),
+        ),
+      )
       .returning();
+
+    if (!updated) {
+      // Distinguish "not found" from "wrong status" for a clear error message
+      const [existing] = await db
+        .select({ status: inspections.status })
+        .from(inspections)
+        .where(
+          and(eq(inspections.id, id), eq(inspections.inspectorId, dbUser.id)),
+        );
+
+      if (!existing) {
+        return NextResponse.json(
+          { error: "Inspection not found" },
+          { status: 404 },
+        );
+      }
+
+      return NextResponse.json(
+        { error: `Cannot change status of a ${existing.status} inspection` },
+        { status: 409 },
+      );
+    }
 
     return NextResponse.json(updated);
   } catch (error) {
