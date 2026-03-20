@@ -72,7 +72,7 @@ const DEFAULT_CONFIG: RoomDetectorConfig = {
   roomThreshold: 0.62,
   angleThreshold: 0.85,
   hysteresisFrames: 3,
-  baselineLockFrames: 2,
+  baselineLockFrames: 3,
   crossRoomFallbackThreshold: 0.68,
   coverageTieBreakGap: 0.03,
   lockStickinessGap: 0.04,

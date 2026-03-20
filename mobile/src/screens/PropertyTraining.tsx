@@ -21,14 +21,15 @@ import {
   StyleSheet,
   ScrollView,
   Alert,
-  Image,
   FlatList,
+  Modal,
   useWindowDimensions,
   Animated,
   Easing,
   BackHandler,
   Linking,
 } from "react-native";
+import { Image } from "expo-image";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { CameraView, useCameraPermissions, useMicrophonePermissions } from "expo-camera";
 import { requireOptionalNativeModule } from "expo-modules-core";
@@ -60,6 +61,7 @@ interface CapturedMedia {
   type: CaptureMode;
   base64?: string; // Only for photos
   uri: string;
+  previewUri?: string;
 }
 
 interface TrainingResult {
@@ -176,6 +178,9 @@ export default function PropertyTrainingScreen() {
   const isRecordingRef = useRef(false);
   const capturesRef = useRef<CapturedMedia[]>([]);
   const recordingPulse = useRef(new Animated.Value(0)).current;
+  const [previewMedia, setPreviewMedia] = useState<CapturedMedia | null>(null);
+  const captureFlashAnim = useRef(new Animated.Value(0)).current;
+  const thumbnailListRef = useRef<FlatList>(null);
   // Track successful uploads so retries don't duplicate — maps capture.id → upload record ids
   const uploadedIdsRef = useRef<Map<string, string[]>>(new Map());
   const cancelRequestedRef = useRef(false);
@@ -212,13 +217,20 @@ export default function PropertyTrainingScreen() {
     }
   }, []);
 
+  const deleteCapturedFiles = useCallback((capture: CapturedMedia) => {
+    if (capture.previewUri && capture.previewUri !== capture.uri) {
+      deleteLocalMedia(capture.previewUri);
+    }
+    deleteLocalMedia(capture.uri);
+  }, [deleteLocalMedia]);
+
   const releaseCapturedMedia = useCallback(
     (media: CapturedMedia[]) => {
-      media.forEach((capture) => deleteLocalMedia(capture.uri));
+      media.forEach((capture) => deleteCapturedFiles(capture));
       capturesRef.current = [];
       uploadedIdsRef.current.clear();
     },
-    [deleteLocalMedia],
+    [deleteCapturedFiles],
   );
 
   const clearCapturedMedia = useCallback(
@@ -516,6 +528,20 @@ export default function PropertyTrainingScreen() {
         };
         setCaptures((prev) => [...prev, newCapture]);
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+        // Flash animation for capture feedback
+        captureFlashAnim.setValue(1);
+        Animated.timing(captureFlashAnim, {
+          toValue: 0,
+          duration: 200,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
+        }).start();
+
+        // Auto-scroll thumbnail strip to newest capture
+        setTimeout(() => {
+          thumbnailListRef.current?.scrollToEnd({ animated: true });
+        }, 100);
       }
     } catch (err) {
       console.error("Capture failed:", err);
@@ -524,6 +550,29 @@ export default function PropertyTrainingScreen() {
     } finally {
       isCapturingRef.current = false;
     }
+  }, []);
+
+  const extractVideoPreviewUri = useCallback(async (videoUri: string) => {
+    const videoThumbnails = videoThumbnailsRef.current;
+    if (!videoThumbnails) {
+      return null;
+    }
+
+    for (const time of VIDEO_KEYFRAME_TIMESTAMPS_MS.slice(0, 3)) {
+      try {
+        const thumb = await videoThumbnails.getThumbnailAsync(videoUri, {
+          time,
+          quality: 0.65,
+        });
+        if (thumb?.uri) {
+          return thumb.uri;
+        }
+      } catch {
+        // Try the next timestamp when an early frame is unavailable.
+      }
+    }
+
+    return null;
   }, []);
 
   // ── Video Recording ──
@@ -566,13 +615,20 @@ export default function PropertyTrainingScreen() {
       });
 
       if (result?.uri) {
+        const previewUri = await extractVideoPreviewUri(result.uri);
         const newCapture: CapturedMedia = {
           id: `vid-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           type: "video",
           uri: result.uri,
+          previewUri: previewUri ?? undefined,
         };
         setCaptures((prev) => [...prev, newCapture]);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
+        // Auto-scroll thumbnail strip to newest capture
+        setTimeout(() => {
+          thumbnailListRef.current?.scrollToEnd({ animated: true });
+        }, 100);
       }
     } catch (err) {
       console.error("Recording failed:", err);
@@ -582,7 +638,7 @@ export default function PropertyTrainingScreen() {
       isRecordingRef.current = false;
       setIsRecording(false);
     }
-  }, [microphonePermission, requestMicrophonePermission]);
+  }, [extractVideoPreviewUri, microphonePermission, requestMicrophonePermission]);
 
   const handleStopRecording = useCallback(() => {
     if (!cameraRef.current || !isRecordingRef.current) return;
@@ -596,13 +652,13 @@ export default function PropertyTrainingScreen() {
     setCaptures((prev) => {
       const capture = prev.find((item) => item.id === id);
       if (capture) {
-        deleteLocalMedia(capture.uri);
+        deleteCapturedFiles(capture);
       }
       const next = prev.filter((item) => item.id !== id);
       capturesRef.current = next;
       return next;
     });
-  }, [deleteLocalMedia]);
+  }, [deleteCapturedFiles]);
 
   const isRunActive = useCallback((runId: number) => {
     return runIdRef.current === runId && !cancelRequestedRef.current;
@@ -751,7 +807,7 @@ export default function PropertyTrainingScreen() {
         return;
       }
       setTrainingResult(result);
-      captures.forEach((capture) => deleteLocalMedia(capture.uri));
+      capturesRef.current.forEach((capture) => deleteCapturedFiles(capture));
       setPhase("results");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (err) {
@@ -788,7 +844,7 @@ export default function PropertyTrainingScreen() {
       }
       setPhase("capturing");
     }
-  }, [captures, deleteLocalMedia, extractVideoKeyframeUris, isRunActive, propertyId]);
+  }, [captures, deleteCapturedFiles, extractVideoKeyframeUris, isRunActive, propertyId]);
 
   const handleDoneCapturing = useCallback(() => {
     const hasVideosWithKeyframes =
@@ -1321,6 +1377,7 @@ export default function PropertyTrainingScreen() {
         {/* Thumbnail strip with visible X delete buttons */}
         {captures.length > 0 && (
           <FlatList
+            ref={thumbnailListRef}
             data={captures}
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -1328,13 +1385,35 @@ export default function PropertyTrainingScreen() {
             contentContainerStyle={styles.thumbnailStrip}
             renderItem={({ item }) => (
               <View style={styles.thumbnailWrapper}>
-                <TouchableOpacity style={styles.thumbnail}>
+                <TouchableOpacity
+                  style={styles.thumbnail}
+                  onPress={() => setPreviewMedia(item)}
+                  activeOpacity={0.7}
+                >
                   {item.type === "video" ? (
-                    <View style={[styles.thumbnailImage, { backgroundColor: colors.camera.background, justifyContent: "center", alignItems: "center" }]}>
-                      <Text style={{ color: "#fff", fontSize: 22 }}>▶</Text>
-                    </View>
+                    item.previewUri ? (
+                      <Image
+                        source={{ uri: item.previewUri }}
+                        style={styles.thumbnailImage}
+                        cachePolicy="none"
+                      />
+                    ) : (
+                      <View style={[styles.thumbnailImage, { backgroundColor: colors.camera.background, justifyContent: "center", alignItems: "center" }]}>
+                        <Text style={{ color: "#fff", fontSize: 22 }}>▶</Text>
+                      </View>
+                    )
                   ) : (
-                    <Image source={{ uri: item.uri }} style={styles.thumbnailImage} />
+                    <Image
+                      source={{ uri: item.uri }}
+                      style={styles.thumbnailImage}
+                      cachePolicy="none"
+                    />
+                  )}
+                  {/* Video badge indicator */}
+                  {item.type === "video" && (
+                    <View style={styles.videoIndicator}>
+                      <Text style={styles.videoIndicatorText}>VID</Text>
+                    </View>
                   )}
                 </TouchableOpacity>
                 {/* Visible X delete button */}
@@ -1443,6 +1522,80 @@ export default function PropertyTrainingScreen() {
           </TouchableOpacity>
         </View>
       </SafeAreaView>
+
+      {/* Capture flash overlay */}
+      <Animated.View
+        style={[
+          StyleSheet.absoluteFill,
+          styles.captureFlash,
+          { opacity: captureFlashAnim },
+        ]}
+        pointerEvents="none"
+      />
+
+      {/* Full-screen preview modal */}
+      <Modal
+        visible={!!previewMedia}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPreviewMedia(null)}
+      >
+        <View style={styles.previewOverlay}>
+          <SafeAreaView style={styles.previewContainer}>
+            <View style={styles.previewTopBar}>
+              <TouchableOpacity
+                style={styles.previewCloseButton}
+                onPress={() => setPreviewMedia(null)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.previewCloseText}>✕ Close</Text>
+              </TouchableOpacity>
+              <Text style={styles.previewTypeLabel}>
+                {previewMedia?.type === "video" ? "Video" : "Photo"} Preview
+              </Text>
+              <TouchableOpacity
+                style={styles.previewDeleteButton}
+                onPress={() => {
+                  if (previewMedia) {
+                    handleRemoveCapture(previewMedia.id);
+                    setPreviewMedia(null);
+                  }
+                }}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.previewDeleteText}>Delete</Text>
+              </TouchableOpacity>
+            </View>
+            {previewMedia?.type === "video" ? (
+              previewMedia.previewUri ? (
+                <View style={styles.previewVideoFrameWrap}>
+                  <Image
+                    source={{ uri: previewMedia.previewUri }}
+                    style={styles.previewImage}
+                    contentFit="contain"
+                    cachePolicy="none"
+                  />
+                  <View style={styles.previewVideoBadge}>
+                    <Text style={styles.previewVideoBadgeText}>Video preview frame</Text>
+                  </View>
+                </View>
+              ) : (
+                <View style={styles.previewVideoPlaceholder}>
+                  <Text style={styles.previewVideoIcon}>▶</Text>
+                  <Text style={styles.previewVideoText}>Video captured</Text>
+                </View>
+              )
+            ) : (
+              <Image
+                source={{ uri: previewMedia?.uri }}
+                style={styles.previewImage}
+                contentFit="contain"
+                cachePolicy="none"
+              />
+            )}
+          </SafeAreaView>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -2275,5 +2428,93 @@ const styles = StyleSheet.create({
     color: colors.primaryForeground,
     fontSize: 16,
     fontWeight: "600",
+  },
+
+  // ── Capture Flash ──
+  captureFlash: {
+    backgroundColor: "#fff",
+    zIndex: 50,
+  },
+
+  // ── Full-Screen Preview ──
+  previewOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.95)",
+  },
+  previewContainer: {
+    flex: 1,
+  },
+  previewTopBar: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  previewCloseButton: {
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  previewCloseText: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "600",
+  },
+  previewTypeLabel: {
+    color: "rgba(255,255,255,0.6)",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  previewDeleteButton: {
+    backgroundColor: "rgba(239, 68, 68, 0.15)",
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: "rgba(239, 68, 68, 0.3)",
+  },
+  previewDeleteText: {
+    color: colors.error,
+    fontSize: 15,
+    fontWeight: "600",
+  },
+  previewImage: {
+    flex: 1,
+    borderRadius: 8,
+    margin: 16,
+  },
+  previewVideoPlaceholder: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  previewVideoFrameWrap: {
+    flex: 1,
+  },
+  previewVideoBadge: {
+    position: "absolute",
+    bottom: 28,
+    alignSelf: "center",
+    backgroundColor: "rgba(0,0,0,0.68)",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  previewVideoBadgeText: {
+    color: "rgba(255,255,255,0.92)",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  previewVideoIcon: {
+    color: "rgba(255,255,255,0.4)",
+    fontSize: 64,
+    marginBottom: 16,
+  },
+  previewVideoText: {
+    color: "rgba(255,255,255,0.5)",
+    fontSize: 16,
+    fontWeight: "500",
   },
 });

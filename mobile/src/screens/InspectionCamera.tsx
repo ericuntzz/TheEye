@@ -11,12 +11,12 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
-  Image,
   Linking,
   Animated,
   AppState,
   type AppStateStatus,
 } from "react-native";
+import { Image } from "expo-image";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
@@ -80,10 +80,10 @@ const LOCALIZATION_ROOM_SYNC_THRESHOLD = 0.62;
 const AUTO_CAPTURE_INTERVAL_MS = 1500;
 
 type LocalizationState =
-  | "not_localized"        // No candidate above 0.70
+  | "not_localized"        // No candidate above NOT_READY threshold (0.40)
   | "localizing"           // Candidate found, smoothing (< 3 frames)
-  | "ambiguous"            // Top-2 candidates within 0.05 of each other
-  | "localized"            // Locked, similarity ≥ 0.85
+  | "ambiguous"            // Top-2 candidates within AMBIGUITY_GAP (0.04) of each other
+  | "localized"            // Locked, similarity ≥ LOCKED threshold (0.50)
   | "capturing"            // Comparison in flight
   | "verification_failed"; // Server could not geometrically verify this view
 
@@ -258,13 +258,14 @@ export default function InspectionCameraScreen() {
       targetAssistTimerRef.current = null;
     }
 
-    const shouldOfferManualTargeting =
+    const shouldOfferTargetAssist =
       !paused &&
       !!lockedBaselineInfo &&
-      (localizationState === "ambiguous" ||
-        localizationState === "verification_failed");
+      lockedBaselineInfo.topCandidates.length > 0 &&
+      localizationState !== "localized" &&
+      localizationState !== "capturing";
 
-    if (!shouldOfferManualTargeting) {
+    if (!shouldOfferTargetAssist) {
       setShowTargetAssist(false);
       return;
     }
@@ -282,10 +283,7 @@ export default function InspectionCameraScreen() {
   }, [lockedBaselineInfo, localizationState, paused]);
 
   useEffect(() => {
-    if (
-      localizationState !== "ambiguous" &&
-      localizationState !== "verification_failed"
-    ) {
+    if (localizationState === "localized" || localizationState === "capturing") {
       setUserSelectedBaselineId(null);
       setShowTargetAssist(false);
     }
@@ -590,6 +588,7 @@ export default function InspectionCameraScreen() {
     }, AUTO_CAPTURE_INTERVAL_MS);
 
     return () => {
+      isMountedRef.current = false;
       motionFilter.stop();
       modelLoaderRef.current?.dispose();
       if (autoCaptureTimerRef.current) {
@@ -601,8 +600,10 @@ export default function InspectionCameraScreen() {
       if (captureHintTimerRef.current) {
         clearTimeout(captureHintTimerRef.current);
       }
+      if (targetAssistTimerRef.current) {
+        clearTimeout(targetAssistTimerRef.current);
+      }
       announcerRef.current.setEnabled(false);
-      isMountedRef.current = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1024,7 +1025,7 @@ export default function InspectionCameraScreen() {
    */
   const autoCaptureTick = useCallback(
     async (session: SessionManager, comparison: ComparisonManager) => {
-      if (!cameraRef.current || pausedRef.current) return;
+      if (!isMountedRef.current || !cameraRef.current || pausedRef.current) return;
 
       const state = session.getState();
       const currentRoomId = state.currentRoomId;
@@ -1090,6 +1091,7 @@ export default function InspectionCameraScreen() {
 
       // Feed lightweight change detection before expensive burst capture.
       const changeFrame = await captureChangeFrame();
+      if (!isMountedRef.current || pausedRef.current) return;
       const changeResult = changeFrame
         ? comparison.feedChangeFrame(changeFrame)
         : undefined;
@@ -1104,12 +1106,14 @@ export default function InspectionCameraScreen() {
       const {
         data: { session: authSession },
       } = await supabase.auth.getSession();
+      if (!isMountedRef.current || pausedRef.current) return;
       if (!authSession?.access_token) return;
 
       const apiUrl = process.env.EXPO_PUBLIC_API_URL;
       if (!apiUrl) return;
 
       const firstCapture = await captureHighResFrame();
+      if (!isMountedRef.current || pausedRef.current) return;
       if (!firstCapture) return;
 
       let rerankedTopK = topK;
@@ -1122,6 +1126,7 @@ export default function InspectionCameraScreen() {
       } finally {
         FileSystem.deleteAsync(firstCapture.uri, { idempotent: true }).catch(() => {});
       }
+      if (!isMountedRef.current || pausedRef.current) return;
 
       const selectedBaseline =
         getBaselineById(rerankedTopK[0]?.baselineId || baseline.id) || {
@@ -1162,6 +1167,7 @@ export default function InspectionCameraScreen() {
         userSelectedBaselineId,
       });
 
+      if (!isMountedRef.current || pausedRef.current) return;
       setLocalizationState("capturing");
       hasFirstAutoCaptureRef.current = true;
       void comparison.triggerComparison(
@@ -1490,6 +1496,7 @@ export default function InspectionCameraScreen() {
 
   // Manual capture trigger
   const handleManualCapture = useCallback(async () => {
+    if (!isMountedRef.current) return;
     const session = sessionRef.current;
     const comparison = comparisonRef.current;
     if (!session || !comparison || !cameraRef.current || paused) return;
@@ -1513,27 +1520,27 @@ export default function InspectionCameraScreen() {
 
     const isStuck = localizationStuckSince != null && Date.now() - localizationStuckSince > 15000;
 
+    let forcedBaselineId: string | null = null;
+    let forcedBaselineSimilarity = 0;
     if (!locked || locked.similarity < 0.45) {
       if (isStuck) {
         // Force compare mode: localization has been failing for >15s,
         // allow capture with whatever the best candidate is
         const forceCandidates = detector?.getTopCandidates(3) || [];
-        if (forceCandidates.length === 0 || !room.baselines.length) {
+        forcedBaselineId = forceCandidates[0]?.baselineId || room.baselines[0]?.id || null;
+        forcedBaselineSimilarity = forceCandidates[0]?.similarity ?? 0;
+        if (!forcedBaselineId) {
           showCaptureHint("No baselines available. Point camera at a trained area.");
           return;
         }
-        // Fall through with the top candidate regardless of similarity
       } else {
         showCaptureHint("Point camera at a trained area first.");
         return;
       }
     }
 
-    const forceCandidate = (!locked || locked.similarity < 0.45)
-      ? (detector?.getTopCandidates(3)?.[0] ?? null)
-      : null;
-    const effectiveLocked = forceCandidate
-      ? { baseline: { id: forceCandidate.baselineId }, similarity: forceCandidate.similarity }
+    const effectiveLocked = forcedBaselineId
+      ? { baseline: { id: forcedBaselineId }, similarity: forcedBaselineSimilarity }
       : locked!;
     const baseline = room.baselines.find(b => b.id === effectiveLocked.baseline.id) || room.baselines[0];
 
@@ -1548,6 +1555,7 @@ export default function InspectionCameraScreen() {
     const {
       data: { session: authSession },
     } = await supabase.auth.getSession();
+    if (!isMountedRef.current) return;
     if (!authSession?.access_token) {
       showCaptureHint("Session expired. Please restart the app.");
       return;
@@ -1560,6 +1568,7 @@ export default function InspectionCameraScreen() {
     }
 
     const firstCapture = await captureHighResFrame();
+    if (!isMountedRef.current) return;
     if (!firstCapture) {
       showCaptureHint("Capture failed. Try again.");
       return;
@@ -1615,6 +1624,7 @@ export default function InspectionCameraScreen() {
       userSelectedBaselineId,
     });
 
+    if (!isMountedRef.current) return;
     setLocalizationState("capturing");
     void comparison.triggerComparison(
       captureFrame,
@@ -1824,7 +1834,7 @@ export default function InspectionCameraScreen() {
         (localizationState === "ambiguous" || showTargetAssist) && (
           <View style={styles.targetAssistStrip}>
             <Text style={styles.targetAssistLabel}>
-              {showTargetAssist ? "Which view are you looking at?" : "Move closer to distinguish views"}
+              {showTargetAssist ? "Which view are you looking at?" : "Tap a view to help localize"}
             </Text>
             <View style={styles.ambiguousThumbnails}>
               {lockedBaselineInfo.topCandidates.slice(0, 3).map((candidate) => {
@@ -1838,30 +1848,36 @@ export default function InspectionCameraScreen() {
                     style={[
                       styles.ambiguousThumb,
                       isSelected && styles.ambiguousThumbSelected,
-                      !showTargetAssist && styles.ambiguousThumbPassive,
                     ]}
-                    disabled={!showTargetAssist}
                     activeOpacity={0.8}
                     onPress={() => {
                       setUserSelectedBaselineId(candidate.baselineId);
-                      showCaptureHint("View selected");
+                      showCaptureHint(
+                        `Selected: ${baseline.label || baseline.roomName || "this view"}`,
+                      );
+                      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                     }}
                   >
                     <Image
                       source={{ uri: baseline.previewUrl || baseline.imageUrl }}
                       style={styles.ambiguousThumbImage}
-                      resizeMode="cover"
+                      contentFit="cover"
+                      cachePolicy="none"
                     />
+                    {/* Room name badge — helps disambiguate cross-room candidates */}
+                    <View style={styles.ambiguousThumbRoomBadge}>
+                      <Text style={styles.ambiguousThumbRoomText} numberOfLines={1}>
+                        {baseline.roomName || "Room"}
+                      </Text>
+                    </View>
                     {baseline.label ? (
                       <Text style={styles.ambiguousThumbLabel} numberOfLines={2}>
                         {baseline.label}
                       </Text>
                     ) : null}
-                    {showTargetAssist && (
-                      <Text style={styles.ambiguousThumbHint}>
-                        {isSelected ? "Selected" : "Tap"}
-                      </Text>
-                    )}
+                    <Text style={styles.ambiguousThumbHint}>
+                      {isSelected ? "✓ Selected" : "Tap"}
+                    </Text>
                   </TouchableOpacity>
                 );
               })}
@@ -2722,9 +2738,6 @@ const styles = StyleSheet.create({
     padding: 6,
     backgroundColor: "rgba(15,23,42,0.82)",
   },
-  ambiguousThumbPassive: {
-    opacity: 0.9,
-  },
   ambiguousThumbSelected: {
     borderColor: "rgba(34,197,94,0.7)",
     backgroundColor: "rgba(34,197,94,0.14)",
@@ -2733,6 +2746,21 @@ const styles = StyleSheet.create({
     width: 100,
     height: 75,
     borderRadius: 6,
+  },
+  ambiguousThumbRoomBadge: {
+    position: "absolute",
+    top: 8,
+    left: 8,
+    backgroundColor: "rgba(0,0,0,0.7)",
+    borderRadius: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+  },
+  ambiguousThumbRoomText: {
+    color: "rgba(255,255,255,0.9)",
+    fontSize: 9,
+    fontWeight: "600",
+    maxWidth: 80,
   },
   ambiguousThumbLabel: {
     color: "rgba(255,255,255,0.88)",

@@ -567,33 +567,65 @@ export async function POST(
     }
 
     // Quality gate: deactivate baselines with very poor quality scores (> 2000),
-    // but always keep at least 2 active baselines (the best ones by score).
+    // but never strand a room without enough active, usable baselines.
     let deactivatedBaselines = 0;
     if (allRoomIds.length > 0) {
       const baselinesWithScores = await db
         .select({
           id: baselineImages.id,
+          roomId: baselineImages.roomId,
           qualityScore: baselineImages.qualityScore,
+          embedding: baselineImages.embedding,
         })
         .from(baselineImages)
         .where(inArray(baselineImages.roomId, allRoomIds));
 
-      // Sort ascending by quality score (lower is better)
-      baselinesWithScores.sort(
-        (a, b) => (a.qualityScore ?? 0) - (b.qualityScore ?? 0),
-      );
-
-      const MIN_ACTIVE_BASELINES = 2;
       const toDeactivate: string[] = [];
+      let deactivatedUsableBaselines = 0;
+      const baselinesByRoom = new Map<
+        string,
+        typeof baselinesWithScores
+      >();
 
-      for (let idx = 0; idx < baselinesWithScores.length; idx++) {
-        const bl = baselinesWithScores[idx];
-        const score = bl.qualityScore ?? 0;
-        const remaining = baselinesWithScores.length - toDeactivate.length;
-        if (score > 2000 && remaining > MIN_ACTIVE_BASELINES) {
-          toDeactivate.push(bl.id);
+      for (const baseline of baselinesWithScores) {
+        const list = baselinesByRoom.get(baseline.roomId) || [];
+        list.push(baseline);
+        baselinesByRoom.set(baseline.roomId, list);
+      }
+
+      for (const roomBaselines of baselinesByRoom.values()) {
+        // Higher quality score is worse, so consider the noisiest baselines first.
+        roomBaselines.sort(
+          (a, b) => (b.qualityScore ?? 0) - (a.qualityScore ?? 0),
+        );
+
+        const usableCount = roomBaselines.filter(
+          (baseline) =>
+            Array.isArray(baseline.embedding) && baseline.embedding.length > 0,
+        ).length;
+        const minActiveUsableBaselines = Math.min(2, usableCount);
+        let remainingUsableBaselines = usableCount;
+
+        for (const baseline of roomBaselines) {
+          const score = baseline.qualityScore ?? 0;
+          if (score <= 2000) continue;
+
+          const hasUsableEmbedding =
+            Array.isArray(baseline.embedding) && baseline.embedding.length > 0;
+          if (
+            hasUsableEmbedding &&
+            remainingUsableBaselines <= minActiveUsableBaselines
+          ) {
+            continue;
+          }
+
+          toDeactivate.push(baseline.id);
+          if (hasUsableEmbedding) {
+            remainingUsableBaselines--;
+            deactivatedUsableBaselines++;
+          }
           console.warn(
-            `[train] Deactivated baseline ${bl.id} due to poor quality score: ${score}`,
+            `[train] Deactivated baseline ${baseline.id} due to poor quality score: ${score}`,
           );
         }
       }
@@ -606,7 +638,7 @@ export async function POST(
         deactivatedBaselines = toDeactivate.length;
         usableBaselineCount = Math.max(
           0,
-          usableBaselineCount - deactivatedBaselines,
+          usableBaselineCount - deactivatedUsableBaselines,
         );
       }
     }
