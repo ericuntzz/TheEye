@@ -33,7 +33,7 @@
 
 ## 1. Product Vision & Context
 
-Atria (formerly TheEye) currently uses a manual room-by-room web inspection flow. We are building **the operating system for property readiness, damage proof, and owner trust** in luxury vacation rentals and second-home management.
+Atria currently uses a manual room-by-room web inspection flow. We are building **the operating system for property readiness, damage proof, and owner trust** in luxury vacation rentals and second-home management.
 
 The product is **NOT** "AI home inspection." It is:
 

@@ -14,7 +14,7 @@
 ### 1. Start the phone-testing stack
 
 ```bash
-cd /Users/fin/.openclaw/workspace/TheEye
+cd /Users/fin/.openclaw/workspace/Atria
 export PATH="$(brew --prefix node@22)/bin:$PATH"
 npm run dev:phone
 ```
