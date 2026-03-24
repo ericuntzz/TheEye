@@ -976,8 +976,11 @@ export default function InspectionCameraScreen() {
 
       const nextRoom = getNextIncompleteRoom(session);
       if (!nextRoom) {
+        // All rooms at 100% — show a gentle message but DON'T stop scanning.
+        // The user decides when they're done. Coverage keeps running so any
+        // additional angles/findings are captured.
         if (!autoAllRoomsCompleteHintRef.current) {
-          showCaptureHint("All room angles captured. End inspection when ready.");
+          showCaptureHint("Coverage complete — keep scanning for detail or tap End.");
           autoAllRoomsCompleteHintRef.current = true;
         }
         return;
@@ -985,9 +988,10 @@ export default function InspectionCameraScreen() {
 
       if (nextRoom.roomId === roomId) return;
 
+      // Multi-room: auto-advance to the next incomplete room
       activateRoom(session, nextRoom.roomId, nextRoom.roomName);
       autoAllRoomsCompleteHintRef.current = false;
-      showCaptureHint(`Room complete. Auto-switched to ${nextRoom.roomName}.`);
+      showCaptureHint(`Moving to ${nextRoom.roomName}`);
       if (activeImageSource !== "camera") {
         void announcerRef.current.announceCoverage(nextRoom.roomName);
       }
@@ -1383,12 +1387,14 @@ export default function InspectionCameraScreen() {
         return;
       }
 
-      // Check if all angles are scanned for auto-advance
+      // Check if all angles are scanned — notify but keep capturing.
+      // Even at 100% coverage, the user may still be scanning and we want
+      // to continue sending frames for AI analysis (finding detection).
       const visit = state.visitedRooms.get(currentRoomId);
       const allScanned = room.baselines.every(b => visit?.anglesScanned.has(b.id));
       if (allScanned && autoCaptureEnabledRef.current) {
         autoAdvanceIfRoomComplete(session, currentRoomId);
-        return;
+        // Don't return — keep capturing for findings even after coverage is complete
       }
 
       // Feed lightweight change detection before expensive burst capture.
