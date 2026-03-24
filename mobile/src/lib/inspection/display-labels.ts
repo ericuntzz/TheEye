@@ -10,7 +10,10 @@ export interface InspectionDisplayTarget {
   metadata?: InspectionDisplayMetadata | null;
 }
 
-const GENERIC_VIEW_LABEL_RE = /^view\s+(\d+)$/i;
+const GENERIC_NUMBERED_LABEL_RE =
+  /^(?:view|angle|area|shot|photo|image|picture|frame)\s+(\d+)$/i;
+const GENERIC_TYPED_LABEL_RE =
+  /^(?:room overview|overview|detail(?: view)?|close[- ]?up(?: check)?)(?:\s+(\d+))?$/i;
 
 function cleanLabelText(value?: string | null): string {
   return (value || "")
@@ -54,7 +57,14 @@ function formatGenericLabel(
   if (imageType === "overview") return `Room overview${suffix}`;
   if (imageType === "required_detail") return `Close-up check${suffix}`;
   if (imageType === "detail") return `Detail view${suffix}`;
-  return `Area ${viewNumber || "view"}`;
+  return viewNumber ? `Area ${viewNumber}` : "Area to check";
+}
+
+function getGenericLabelMatch(label: string): RegExpMatchArray | null {
+  return (
+    label.match(GENERIC_NUMBERED_LABEL_RE) ||
+    label.match(GENERIC_TYPED_LABEL_RE)
+  );
 }
 
 export function getInspectionDisplayLabel(
@@ -64,13 +74,11 @@ export function getInspectionDisplayLabel(
   const roomName = cleanLabelText(target.roomName);
   const cleanedLabel = cleanLabelText(target.label);
   const shortenedLabel = stripRoomNamePrefix(cleanedLabel, roomName);
-  const genericMatch =
-    shortenedLabel.match(GENERIC_VIEW_LABEL_RE) ||
-    cleanedLabel.match(GENERIC_VIEW_LABEL_RE);
+  const genericMatch = getGenericLabelMatch(shortenedLabel) || getGenericLabelMatch(cleanedLabel);
 
   const isSpecificShortLabel =
     !!shortenedLabel &&
-    !GENERIC_VIEW_LABEL_RE.test(shortenedLabel) &&
+    !getGenericLabelMatch(shortenedLabel) &&
     shortenedLabel.toLowerCase() !== roomName.toLowerCase();
 
   if (isSpecificShortLabel) {

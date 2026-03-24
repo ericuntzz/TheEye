@@ -373,7 +373,13 @@ export default function InspectionCameraScreen() {
     }
   }, [localizationState]);
 
-  const NOISY_HINTS = ["adjusting", "keep scanning", "try a slightly", "try again"];
+  const NOISY_HINTS = [
+    "adjusting",
+    "keep scanning",
+    "try a slightly",
+    "try again",
+    "tap a suggested view below",
+  ];
 
   const showCaptureHint = useCallback((message: string) => {
     // Suppress noisy/repetitive guidance when room is mostly or fully covered

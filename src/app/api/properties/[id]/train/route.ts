@@ -30,6 +30,52 @@ const PREVIEW_WIDTH = 640;
 const PREVIEW_HEIGHT = 360;
 const VERIFICATION_WIDTH = 480;
 const VERIFICATION_HEIGHT = 360;
+const GENERIC_IMAGE_LABEL_RE =
+  /^(?:view|angle|area|shot|photo|image|picture|frame)\s*\d*$/i;
+const GENERIC_TYPED_IMAGE_LABEL_RE =
+  /^(?:room overview|overview|detail(?: view)?|close[- ]?up(?: check)?)(?:\s*\d+)?$/i;
+
+function normalizeInspectionLabel(
+  rawLabel: string | null | undefined,
+  fallbackRoomName: string,
+  fallbackIndex: number,
+  classification?: {
+    type?: string;
+    detail_subject?: string | null;
+  } | null,
+): string {
+  const cleanedLabel = typeof rawLabel === "string" ? rawLabel.trim().slice(0, 100) : "";
+  const detailSubject =
+    typeof classification?.detail_subject === "string"
+      ? classification.detail_subject.trim().slice(0, 100)
+      : "";
+  const imageType = classification?.type;
+
+  const isGeneric =
+    !cleanedLabel ||
+    GENERIC_IMAGE_LABEL_RE.test(cleanedLabel) ||
+    GENERIC_TYPED_IMAGE_LABEL_RE.test(cleanedLabel);
+
+  if (!isGeneric) {
+    return cleanedLabel;
+  }
+
+  if (detailSubject) {
+    return detailSubject;
+  }
+
+  if (imageType === "overview") {
+    return `${fallbackRoomName} overview`;
+  }
+  if (imageType === "required_detail") {
+    return `Close-up check ${fallbackIndex + 1}`;
+  }
+  if (imageType === "detail") {
+    return `Detail view ${fallbackIndex + 1}`;
+  }
+
+  return `${fallbackRoomName} view ${fallbackIndex + 1}`;
+}
 
 function createStorageAdminClient(): SupabaseClient | null {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -463,17 +509,15 @@ export async function POST(
           roomImageClassifications && typeof roomImageClassifications === "object"
             ? roomImageClassifications[imgUrl]
             : null;
-        const detailSubjectFallback =
-          typeof classification?.detail_subject === "string"
-            ? classification.detail_subject
-            : null;
         const [inserted] = await db.insert(baselineImages).values({
           roomId: newRoom.id,
           imageUrl: imgUrl,
-          label:
-            labelFromAi?.trim().slice(0, 100) ||
-            detailSubjectFallback?.trim().slice(0, 100) ||
-            `${roomName} view ${baselineCount + 1}`,
+          label: normalizeInspectionLabel(
+            labelFromAi,
+            roomName,
+            baselineCount,
+            classification,
+          ),
           isActive: true,
         }).returning({ id: baselineImages.id });
         if (inserted) {
@@ -529,16 +573,15 @@ export async function POST(
             roomImageClassifications && typeof roomImageClassifications === "object"
               ? roomImageClassifications[fallbackUrl]
               : null;
-          const detailSubjectFallback =
-            typeof classification?.detail_subject === "string"
-              ? classification.detail_subject
-              : null;
           const [inserted] = await db.insert(baselineImages).values({
             roomId: newRoom.id,
             imageUrl: fallbackUrl,
-            label:
-              detailSubjectFallback?.trim().slice(0, 100) ||
-              `${roomName} view ${j - startIdx + 1}`,
+            label: normalizeInspectionLabel(
+              null,
+              roomName,
+              j - startIdx,
+              classification,
+            ),
             isActive: true,
           }).returning({ id: baselineImages.id });
           if (inserted) {
