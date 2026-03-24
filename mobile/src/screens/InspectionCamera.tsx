@@ -82,7 +82,10 @@ const LOCALIZATION_AUTO_CAPTURE_THRESHOLD = 0.55;
 const LOCALIZATION_AMBIGUITY_GAP = 0.04;
 const LOCALIZATION_OVERLAY_GRACE_MS = 1400;
 const LOCALIZATION_ROOM_SYNC_THRESHOLD = 0.68;
-const AUTO_CAPTURE_INTERVAL_MS = 800;
+/** On-device coverage credit: grant when embedding similarity exceeds this.
+ *  No server round-trip needed — ONNX embedding match is sufficient for coverage. */
+const ON_DEVICE_COVERAGE_THRESHOLD = 0.70;
+const AUTO_CAPTURE_INTERVAL_MS = 500;
 
 type LocalizationState =
   | "not_localized"        // No candidate above NOT_READY threshold (0.40)
@@ -259,6 +262,8 @@ export default function InspectionCameraScreen() {
   const pendingAnalysesRef = useRef<Map<string, { roomId: string; baselineId: string; startedAt: number }>>(new Map());
   /** Tracks comparisonIds that already received early coverage credit via verified event */
   const verifiedComparisonIdsRef = useRef<Set<string>>(new Set());
+  /** Tracks baselines that already received on-device coverage credit (embedding-only, no server) */
+  const onDeviceCreditedRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     autoCaptureEnabledRef.current = autoCaptureEnabled;
@@ -1168,6 +1173,39 @@ export default function InspectionCameraScreen() {
               } else if (locked.similarity >= LOCALIZATION_LOCKED_THRESHOLD) {
                 setLocalizationState("localized");
                 setLocalizationStuckSince(null);
+
+                // On-device coverage credit: when embedding similarity is high enough,
+                // grant coverage immediately without waiting for server round-trip.
+                // This enables walking-pace inspection — ONNX match IS the verification.
+                if (
+                  locked.similarity >= ON_DEVICE_COVERAGE_THRESHOLD &&
+                  locked.isLocked &&
+                  !onDeviceCreditedRef.current.has(locked.baseline.id)
+                ) {
+                  const baselineId = locked.baseline.id;
+                  const bRoomId = locked.baseline.roomId;
+                  onDeviceCreditedRef.current.add(baselineId);
+
+                  // Full cluster + hierarchy credit (same rules as verified event)
+                  const clusterIds = detector.getClusterMembers(baselineId) || [baselineId];
+                  const hierarchyIds: string[] = [];
+                  const hierarchy = detector.getHierarchy(baselineId);
+                  if (hierarchy) {
+                    if (hierarchy.parentId) hierarchyIds.push(hierarchy.parentId);
+                    if (hierarchy.childIds.length > 0) hierarchyIds.push(...hierarchy.childIds);
+                    // required_detail children are NOT auto-credited
+                  }
+                  const allCreditIds = new Set([...clusterIds, ...hierarchyIds]);
+                  for (const cid of allCreditIds) {
+                    session.recordAngleScan(bRoomId, cid);
+                    detector.markAngleScanned(cid, bRoomId);
+                    onDeviceCreditedRef.current.add(cid); // prevent re-credit
+                  }
+                  updateCoverageUI(session, bRoomId);
+                  showCaptureHint("View captured");
+                  void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                  autoAdvanceIfRoomComplete(session, bRoomId);
+                }
               } else {
                 setLocalizationState("localizing");
                 setLocalizationStuckSince((prev) => prev ?? Date.now());
@@ -1194,7 +1232,7 @@ export default function InspectionCameraScreen() {
       // Start the loop
       roomDetectionTimerRef.current = setTimeout(tick, 1000); // Initial 1s delay
     },
-    [activateRoom, syncRoomFromLockedBaseline, updateCoverageUI],
+    [activateRoom, syncRoomFromLockedBaseline, updateCoverageUI, showCaptureHint, autoAdvanceIfRoomComplete],
   );
 
   const captureChangeFrame = useCallback(async (): Promise<Uint8Array | null> => {

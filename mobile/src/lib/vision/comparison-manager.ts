@@ -70,10 +70,10 @@ export interface ComparisonManagerConfig {
 }
 
 const DEFAULT_CONFIG: ComparisonManagerConfig = {
-  minIntervalMs: 1200,
-  maxConcurrent: 2,
+  minIntervalMs: 800,
+  maxConcurrent: 3,
   burstDelayMs: 250,
-  manualMinIntervalMs: 900,
+  manualMinIntervalMs: 600,
 };
 
 export type ComparisonTriggerSource = "auto" | "manual";
@@ -186,9 +186,12 @@ export class ComparisonManager {
 
     if (this.paused) return false;
     if (this.activeComparisons >= this.config.maxConcurrent) return false;
+    // Motion gate: allow captures during steady walking (walkthrough-ready).
+    // Coverage credit is now granted on-device from embeddings, so the server
+    // comparison is background-only for AI damage detection.
     const motionOk =
       this.motionFilter.isStable() ||
-      (options?.allowWalkthroughMotion && this.motionFilter.isWalkthroughReady());
+      this.motionFilter.isWalkthroughReady();
     if (!motionOk) return false;
 
     // Exponential backoff on consecutive failures (3s, 6s, 12s, 24s, 48s cap)
