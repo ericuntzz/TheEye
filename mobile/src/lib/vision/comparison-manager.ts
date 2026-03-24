@@ -394,63 +394,60 @@ export class ComparisonManager {
         return;
       }
 
-      // Parse SSE response — handle multi-line data fields
-      const text = await res.text();
-
-      // Final staleness check before delivering results
-      if (isStale()) return;
-
-      const sseEvents = text.split("\n\n");
+      // True streaming SSE parsing — process events as they arrive so the
+      // `verified` event grants coverage credit before Claude analysis completes.
+      const context: ComparisonContext = {
+        roomId,
+        roomName,
+        baselineImageId: options.baselineImageId,
+        triggerSource: options.triggerSource || "auto",
+      };
       let receivedResult = false;
-      for (const event of sseEvents) {
-        const typeMatch = event.match(/^event: (\w+)/m);
-        // Join all `data:` lines per SSE spec (multiple data lines are concatenated with \n)
-        const dataLines = event.match(/^data: (.+)$/gm);
-        const dataPayload = dataLines
-          ? dataLines.map((line) => line.slice(6)).join("\n")
-          : null;
-        if (typeMatch?.[1] === "verified" && dataPayload) {
-          // Fast path: geometric verification passed — grant early coverage credit
-          if (!isStale()) {
-            try {
-              const verified: VerifiedEvent = JSON.parse(dataPayload);
-              this.onVerifiedCallback?.(verified, {
-                roomId,
-                roomName,
-                baselineImageId: options.baselineImageId,
-                triggerSource: options.triggerSource || "auto",
-              });
-            } catch (parseErr) {
-              console.warn("[ComparisonManager] Failed to parse SSE verified:", parseErr);
-            }
+
+      const reader = res.body?.getReader();
+      if (!reader) {
+        // Fallback: no streaming body (shouldn't happen in React Native)
+        const text = await res.text();
+        if (isStale()) return;
+        receivedResult = this.parseSSEBatch(text, context, isStale);
+      } else {
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          if (isStale()) { reader.cancel(); return; }
+
+          const { value, done } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+
+          // SSE events are separated by double newlines
+          let boundary: number;
+          while ((boundary = buffer.indexOf("\n\n")) !== -1) {
+            const eventText = buffer.slice(0, boundary);
+            buffer = buffer.slice(boundary + 2);
+
+            if (!eventText.trim()) continue;
+
+            const parsed = this.parseSingleSSEEvent(eventText, context, isStale);
+            if (parsed === "result") receivedResult = true;
+            if (parsed === "error") return;
           }
-        } else if (typeMatch?.[1] === "result" && dataPayload) {
-          try {
-            const result: ComparisonResult = JSON.parse(dataPayload);
-            receivedResult = true;
-            if (!isStale()) {
-              this.onFinding?.(result, {
-                roomId,
-                roomName,
-                baselineImageId: options.baselineImageId,
-                triggerSource: options.triggerSource || "auto",
-              });
-            }
-          } catch (parseErr) {
-            console.warn("[ComparisonManager] Failed to parse SSE result:", parseErr);
-          }
-        } else if (typeMatch?.[1] === "error") {
-          console.warn("[ComparisonManager] Server returned SSE error event");
-          this.consecutiveFailures++;
-          this.onStatus?.("error");
-          return;
+        }
+
+        // Process any remaining buffer content
+        if (buffer.trim() && !isStale()) {
+          const parsed = this.parseSingleSSEEvent(buffer, context, isStale);
+          if (parsed === "result") receivedResult = true;
         }
       }
 
       if (receivedResult) {
         this.consecutiveFailures = 0;
         this.onStatus?.("complete");
-      } else {
+      } else if (!isStale()) {
         this.consecutiveFailures++;
         this.onStatus?.("error");
       }
@@ -467,6 +464,76 @@ export class ComparisonManager {
         this.activeComparisons--;
       }
     }
+  }
+
+  /**
+   * Parse a single SSE event text block and dispatch to the appropriate callback.
+   * Returns "result" if a result event was parsed, "error" for error events, null otherwise.
+   */
+  private parseSingleSSEEvent(
+    eventText: string,
+    context: ComparisonContext,
+    isStale: () => boolean,
+  ): "result" | "error" | null {
+    const typeMatch = eventText.match(/^event: (\w+)/m);
+    const dataLines = eventText.match(/^data: (.+)$/gm);
+    const dataPayload = dataLines
+      ? dataLines.map((line) => line.slice(6)).join("\n")
+      : null;
+
+    if (typeMatch?.[1] === "verified" && dataPayload) {
+      if (!isStale()) {
+        try {
+          const verified: VerifiedEvent = JSON.parse(dataPayload);
+          this.onVerifiedCallback?.(verified, context);
+        } catch (parseErr) {
+          console.warn("[ComparisonManager] Failed to parse SSE verified:", parseErr);
+        }
+      }
+      return null;
+    }
+
+    if (typeMatch?.[1] === "result" && dataPayload) {
+      try {
+        const result: ComparisonResult = JSON.parse(dataPayload);
+        if (!isStale()) {
+          this.onFinding?.(result, context);
+        }
+        return "result";
+      } catch (parseErr) {
+        console.warn("[ComparisonManager] Failed to parse SSE result:", parseErr);
+      }
+      return null;
+    }
+
+    if (typeMatch?.[1] === "error") {
+      console.warn("[ComparisonManager] Server returned SSE error event");
+      this.consecutiveFailures++;
+      this.onStatus?.("error");
+      return "error";
+    }
+
+    return null;
+  }
+
+  /**
+   * Fallback batch parser: parse all SSE events from a complete text response.
+   * Used when ReadableStream is not available.
+   */
+  private parseSSEBatch(
+    text: string,
+    context: ComparisonContext,
+    isStale: () => boolean,
+  ): boolean {
+    let receivedResult = false;
+    const sseEvents = text.split("\n\n");
+    for (const event of sseEvents) {
+      if (!event.trim()) continue;
+      const parsed = this.parseSingleSSEEvent(event, context, isStale);
+      if (parsed === "result") receivedResult = true;
+      if (parsed === "error") return false;
+    }
+    return receivedResult;
   }
 
   /**

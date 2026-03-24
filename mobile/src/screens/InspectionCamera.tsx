@@ -83,8 +83,9 @@ const LOCALIZATION_AMBIGUITY_GAP = 0.04;
 const LOCALIZATION_OVERLAY_GRACE_MS = 1400;
 const LOCALIZATION_ROOM_SYNC_THRESHOLD = 0.68;
 /** On-device coverage credit: grant when embedding similarity exceeds this.
- *  No server round-trip needed — ONNX embedding match is sufficient for coverage. */
-const ON_DEVICE_COVERAGE_THRESHOLD = 0.70;
+ *  No server round-trip needed — ONNX embedding match is sufficient for coverage.
+ *  0.60 is conservative enough to avoid false matches but reachable during walking. */
+const ON_DEVICE_COVERAGE_THRESHOLD = 0.60;
 const AUTO_CAPTURE_INTERVAL_MS = 500;
 
 type LocalizationState =
