@@ -556,7 +556,9 @@ export default function InspectionCameraScreen() {
 
       // Skip if on-device credit already granted for this baseline
       if (resolvedBaselineId && onDeviceCreditedRef.current.has(resolvedBaselineId)) {
-        // On-device path already handled coverage + haptics — just track pending analysis
+        // On-device path already handled coverage + haptics — just refresh waypoint dots
+        // so the "analyzing" state shows up in the tri-state display
+        updateCoverageUI(session, resolvedRoomId);
         return;
       }
 
@@ -638,6 +640,8 @@ export default function InspectionCameraScreen() {
         if (result.findings && result.findings.length > 0) {
           issueBaselinesRef.current.add(resolvedBaselineId);
         }
+        // Refresh waypoint dots to reflect the state transition
+        updateCoverageUI(session, resolvedRoomId);
       }
 
       if (result.status === "localization_failed") {
@@ -820,7 +824,12 @@ export default function InspectionCameraScreen() {
         }, 10_000);
       }
       if (status === "error") {
-        showCaptureHint("Adjusting - keep scanning");
+        // Suppress noisy error hint when room is mostly complete
+        const currentRoom = sessionRef.current?.getState().currentRoomId;
+        const roomCov = currentRoom ? roomDetectorRef.current?.getRoomCoverage(currentRoom) : null;
+        if (!roomCov || roomCov.percentage < 80) {
+          showCaptureHint("Adjusting - keep scanning");
+        }
         if (event?.comparisonId) {
           pendingAnalysesRef.current.delete(event.comparisonId);
           verifiedComparisonIdsRef.current.delete(event.comparisonId);
