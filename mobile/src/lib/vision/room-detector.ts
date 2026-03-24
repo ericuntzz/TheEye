@@ -103,7 +103,8 @@ function cosineSimilarity(a: number[], b: number[]): number {
 /** Similarity threshold for clustering nearby baselines within the same room */
 // Lowered from 0.75 to group wide-angle and medium-angle views of the same area.
 // Close-ups and wide shots of the same subject have ~0.4-0.6 embedding similarity;
-// 0.55 catches these while avoiding cross-room false clusters.
+// 0.55 catches these while avoiding cross-room false clusters. required_detail
+// baselines are intentionally excluded from clustering so they remain separately required.
 const CLUSTER_SIMILARITY_THRESHOLD = 0.55;
 
 export class RoomDetector {
@@ -235,6 +236,9 @@ export class RoomDetector {
     const byRoom = new Map<string, BaselineAngle[]>();
     for (const b of this.baselines) {
       if (!b.embedding) continue;
+      if (b.metadata?.imageType === "required_detail") {
+        continue;
+      }
       const arr = byRoom.get(b.roomId) || [];
       arr.push(b);
       byRoom.set(b.roomId, arr);
@@ -293,6 +297,83 @@ export class RoomDetector {
         }
       }
     }
+  }
+
+  private getEffectiveRoomProgress(roomId: string): {
+    scanned: number;
+    total: number;
+    percentage: number;
+  } {
+    const roomBaselines = this.baselines.filter((b) => b.roomId === roomId);
+    if (roomBaselines.length === 0) {
+      return { scanned: 0, total: 0, percentage: 0 };
+    }
+
+    const parent = new Map<string, string>();
+    for (const baseline of roomBaselines) {
+      parent.set(baseline.id, baseline.id);
+    }
+
+    const find = (id: string): string => {
+      let root = id;
+      while (parent.get(root) !== root) {
+        root = parent.get(root)!;
+      }
+      let current = id;
+      while (current !== root) {
+        const next = parent.get(current)!;
+        parent.set(current, root);
+        current = next;
+      }
+      return root;
+    };
+
+    const union = (a: string, b: string) => {
+      if (!parent.has(a) || !parent.has(b)) return;
+      const rootA = find(a);
+      const rootB = find(b);
+      if (rootA !== rootB) {
+        parent.set(rootB, rootA);
+      }
+    };
+
+    for (const baseline of roomBaselines) {
+      const members = this.baselineClusters.get(baseline.id) || [baseline.id];
+      for (const memberId of members) {
+        union(baseline.id, memberId);
+      }
+    }
+
+    for (const baseline of roomBaselines) {
+      if (baseline.metadata?.imageType === "required_detail") {
+        continue;
+      }
+      const hierarchy = this.baselineHierarchy.get(baseline.id);
+      if (hierarchy?.parentId) {
+        union(baseline.id, hierarchy.parentId);
+      }
+    }
+
+    const totalRoots = new Set<string>();
+    for (const baseline of roomBaselines) {
+      totalRoots.add(find(baseline.id));
+    }
+
+    const scannedIds = this.scannedAngles.get(roomId) || new Set<string>();
+    const scannedRoots = new Set<string>();
+    for (const baselineId of scannedIds) {
+      if (parent.has(baselineId)) {
+        scannedRoots.add(find(baselineId));
+      }
+    }
+
+    const total = totalRoots.size;
+    const scanned = Math.min(scannedRoots.size, total);
+    return {
+      scanned,
+      total,
+      percentage: total === 0 ? 0 : (scanned / total) * 100,
+    };
   }
 
   /**
@@ -639,13 +720,7 @@ export class RoomDetector {
     total: number;
     percentage: number;
   } {
-    const scanned = this.scannedAngles.get(roomId)?.size || 0;
-    const total = this.totalAnglesPerRoom.get(roomId) || 0;
-    return {
-      scanned,
-      total,
-      percentage: total === 0 ? 0 : (scanned / total) * 100,
-    };
+    return this.getEffectiveRoomProgress(roomId);
   }
 
   /**
@@ -656,13 +731,15 @@ export class RoomDetector {
     totalRooms: number;
     averagePercentage: number;
   } {
-    let totalPercentage = 0;
+    let scannedUnits = 0;
+    let totalUnits = 0;
     let roomCount = 0;
     let scannedRooms = 0;
 
     for (const [roomId] of this.totalAnglesPerRoom) {
-      const coverage = this.getRoomCoverage(roomId);
-      totalPercentage += coverage.percentage;
+      const coverage = this.getEffectiveRoomProgress(roomId);
+      scannedUnits += coverage.scanned;
+      totalUnits += coverage.total;
       roomCount++;
       if (coverage.scanned > 0) scannedRooms++;
     }
@@ -670,7 +747,7 @@ export class RoomDetector {
     return {
       scannedRooms,
       totalRooms: roomCount,
-      averagePercentage: roomCount === 0 ? 0 : totalPercentage / roomCount,
+      averagePercentage: totalUnits === 0 ? 0 : (scannedUnits / totalUnits) * 100,
     };
   }
 
@@ -686,17 +763,18 @@ export class RoomDetector {
    * Each cluster counts as one angle since scanning any member covers all.
    */
   getRoomAngleCount(roomId: string): number {
-    const roomBaselines = this.baselines.filter((b) => b.roomId === roomId);
-    const counted = new Set<string>();
-    let count = 0;
-    for (const b of roomBaselines) {
-      if (counted.has(b.id)) continue;
-      count++;
-      // Mark all cluster members as counted
-      const members = this.baselineClusters.get(b.id) || [b.id];
-      for (const m of members) counted.add(m);
-    }
-    return count;
+    return this.getEffectiveRoomProgress(roomId).total;
+  }
+
+  /**
+   * Get room progress counts using the same effective-angle model as UI hints.
+   */
+  getRoomProgress(roomId: string): {
+    scanned: number;
+    total: number;
+    percentage: number;
+  } {
+    return this.getEffectiveRoomProgress(roomId);
   }
 
   /**

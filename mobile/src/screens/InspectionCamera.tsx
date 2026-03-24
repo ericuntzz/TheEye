@@ -883,7 +883,12 @@ export default function InspectionCameraScreen() {
 
   const updateCoverageUI = useCallback(
     (session: SessionManager, roomId?: string) => {
-      setCoverage(Math.round(session.getOverallCoverage()));
+      const detectorCoverage = roomDetectorRef.current?.getOverallCoverage();
+      setCoverage(
+        Math.round(
+          detectorCoverage?.averagePercentage ?? session.getOverallCoverage(),
+        ),
+      );
       if (roomId) {
         const state = session.getState();
         const visit = state.visitedRooms.get(roomId);
@@ -892,9 +897,13 @@ export default function InspectionCameraScreen() {
         );
 
         if (visit && roomBaselines) {
+          const roomProgress = roomDetectorRef.current?.getRoomProgress(roomId);
           setRoomAngles({
-            scanned: visit.anglesScanned.size,
-            total: roomBaselines.baselines?.length || 0,
+            scanned: roomProgress?.scanned ?? visit.anglesScanned.size,
+            total:
+              roomProgress?.total ??
+              roomBaselines.baselines?.length ??
+              0,
           });
 
           // Update waypoint data for CoverageTracker
@@ -1214,9 +1223,9 @@ export default function InspectionCameraScreen() {
                   updateCoverageUI(session, bRoomId);
 
                   // Show specific progress feedback so user knows exactly what happened
-                  const roomState = session.getState().visitedRooms.get(bRoomId);
-                  const scannedCount = roomState?.anglesScanned.size ?? 0;
-                  const totalAngles = detector.getRoomAngleCount(bRoomId) || 1;
+                  const roomProgress = detector.getRoomProgress(bRoomId);
+                  const scannedCount = roomProgress.scanned;
+                  const totalAngles = roomProgress.total || 1;
                   const label = locked.baseline.label || "View";
                   showCaptureHint(`${label} captured (${scannedCount}/${totalAngles})`);
                   void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -1816,22 +1825,31 @@ export default function InspectionCameraScreen() {
         });
       }
 
+      const roomProgress = roomDetectorRef.current?.getRoomProgress(roomId);
       summaryRooms.push({
         roomId,
         roomName: visit.roomName,
         score: visit.bestScore,
-        coverage: anglesTotal > 0 ? Math.round((visit.anglesScanned.size / anglesTotal) * 100) : 0,
-        anglesScanned: visit.anglesScanned.size,
-        anglesTotal,
+        coverage:
+          roomProgress
+            ? Math.round(roomProgress.percentage)
+            : anglesTotal > 0
+              ? Math.round((visit.anglesScanned.size / anglesTotal) * 100)
+              : 0,
+        anglesScanned: roomProgress?.scanned ?? visit.anglesScanned.size,
+        anglesTotal: roomProgress?.total ?? anglesTotal,
         confirmedFindings: confirmed.length,
         findings: roomFindings,
       });
     }
 
+    const detectorCoverage = roomDetectorRef.current?.getOverallCoverage();
     const summaryData: SummaryData = {
       overallScore: session.getOverallScore(),
       completionTier: session.getCompletionTier(),
-      overallCoverage: Math.round(session.getOverallCoverage()),
+      overallCoverage: Math.round(
+        detectorCoverage?.averagePercentage ?? session.getOverallCoverage(),
+      ),
       durationMs: session.getDurationMs(),
       inspectionMode: inspectionMode,
       rooms: summaryRooms,
