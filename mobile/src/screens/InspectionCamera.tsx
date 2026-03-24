@@ -373,22 +373,21 @@ export default function InspectionCameraScreen() {
     }
   }, [localizationState]);
 
-  const NOISY_HINTS = [
-    "adjusting",
-    "keep scanning",
-    "try a slightly",
-    "try again",
-    "tap a suggested view below",
-  ];
-
   const showCaptureHint = useCallback((message: string) => {
-    // Suppress noisy/repetitive guidance when room is mostly or fully covered
+    // Suppress specific noisy/repetitive guidance when room is mostly or fully covered.
+    // Match exact messages, NOT substrings — avoids suppressing legitimate messages
+    // like "Coverage complete — keep scanning for detail" or "Capture failed. Try again."
     const currentRoom = sessionRef.current?.getState().currentRoomId;
     const roomCov = currentRoom ? roomDetectorRef.current?.getRoomCoverage(currentRoom) : null;
     if (roomCov && roomCov.percentage >= 80) {
-      const lower = message.toLowerCase();
-      if (NOISY_HINTS.some(h => lower.includes(h))) {
-        return; // Don't show contradictory hints near completion
+      const lower = message.toLowerCase().trim();
+      if (
+        lower === "adjusting — keep scanning" ||
+        lower === "adjusting - keep scanning" ||
+        lower === "try a slightly different angle" ||
+        lower.startsWith("tap a suggested view")
+      ) {
+        return; // Don't show contradictory guidance near completion
       }
     }
 
@@ -530,6 +529,7 @@ export default function InspectionCameraScreen() {
       const now = Date.now();
       for (const [id, entry] of pendingAnalysesRef.current) {
         if (now - entry.startedAt > 90_000) {
+          analyzingBaselinesRef.current.delete(entry.baselineId);
           pendingAnalysesRef.current.delete(id);
           verifiedComparisonIdsRef.current.delete(id);
         }
@@ -844,6 +844,11 @@ export default function InspectionCameraScreen() {
       if (status === "error") {
         showCaptureHint("Adjusting - keep scanning");
         if (event?.comparisonId) {
+          // Clean up all tracking for this failed comparison
+          const pending = pendingAnalysesRef.current.get(event.comparisonId);
+          if (pending) {
+            analyzingBaselinesRef.current.delete(pending.baselineId);
+          }
           pendingAnalysesRef.current.delete(event.comparisonId);
           verifiedComparisonIdsRef.current.delete(event.comparisonId);
         } else {
@@ -851,10 +856,16 @@ export default function InspectionCameraScreen() {
           const now = Date.now();
           for (const [id, entry] of pendingAnalysesRef.current) {
             if (now - entry.startedAt > 10_000) {
+              analyzingBaselinesRef.current.delete(entry.baselineId);
               pendingAnalysesRef.current.delete(id);
               verifiedComparisonIdsRef.current.delete(id);
             }
           }
+        }
+        // Refresh waypoint dots to clear stuck blue dots
+        const currentRoom = sessionRef.current?.getState().currentRoomId;
+        if (currentRoom) {
+          updateCoverageUI(sessionRef.current!, currentRoom);
         }
       }
     });
