@@ -157,9 +157,11 @@ export class RoomDetector {
   private lockedBaseline: LockedBaselineInfo | null = null;
   private currentBaselineScores: BaselineCandidate[] = [];
 
-  // Coverage tracking: roomId -> Set of scanned baseline IDs
-  // NOTE: This is only updated externally via markAngleScanned() after server verification
+  // Coverage tracking:
+  // - scannedAngles: all baselines marked as "seen" for UI/context
+  // - completionScannedAngles: baselines that count toward completion/progress
   private scannedAngles = new Map<string, Set<string>>();
+  private completionScannedAngles = new Map<string, Set<string>>();
   private totalAnglesPerRoom = new Map<string, number>();
 
   // Baseline clusters: baselineId -> array of cluster-member baselineIds (including self)
@@ -231,6 +233,7 @@ export class RoomDetector {
   loadBaselines(baselines: BaselineAngle[]) {
     this.baselines = baselines;
     this.scannedAngles.clear();
+    this.completionScannedAngles.clear();
     this.totalAnglesPerRoom.clear();
 
     // Reset baseline lock state
@@ -244,6 +247,7 @@ export class RoomDetector {
       if (!this.totalAnglesPerRoom.has(b.roomId)) {
         this.totalAnglesPerRoom.set(b.roomId, 0);
         this.scannedAngles.set(b.roomId, new Set());
+        this.completionScannedAngles.set(b.roomId, new Set());
       }
       this.totalAnglesPerRoom.set(
         b.roomId,
@@ -404,9 +408,9 @@ export class RoomDetector {
     }
 
     // NOTE: hierarchy parent-child links are intentionally NOT unioned here.
-    // Hierarchy credit expands scannedAngles (green dots in UI) but should NOT
-    // collapse the effective angle count for completion. An overview match should
-    // not make detail baselines count as "done" for progress purposes.
+    // Hierarchy credit expands UI/context "seen" state but should NOT collapse
+    // the effective angle count for completion. An overview match should not
+    // make detail baselines count as "done" for progress purposes.
     // Only cluster peers (genuinely similar angles) reduce the required count.
 
     const totalRoots = new Set<string>();
@@ -414,7 +418,7 @@ export class RoomDetector {
       totalRoots.add(find(baseline.id));
     }
 
-    const scannedIds = this.scannedAngles.get(roomId) || new Set<string>();
+    const scannedIds = this.completionScannedAngles.get(roomId) || new Set<string>();
     const scannedRoots = new Set<string>();
     for (const baselineId of scannedIds) {
       if (parent.has(baselineId)) {
@@ -589,7 +593,8 @@ export class RoomDetector {
     // Compute diagnostic angle scan results (read-only, no state mutation)
     const anglesScanned: AngleScanResult[] = [];
     for (const { baseline, similarity } of scores) {
-      const scanned = this.scannedAngles.get(baseline.roomId)?.has(baseline.id) ?? false;
+      const scanned =
+        this.completionScannedAngles.get(baseline.roomId)?.has(baseline.id) ?? false;
       anglesScanned.push({
         baselineId: baseline.id,
         similarity,
@@ -709,7 +714,7 @@ export class RoomDetector {
    * Check if a baseline has been marked as scanned (server-verified).
    */
   private isBaselineScanned(baseline: BaselineAngle): boolean {
-    return this.scannedAngles.get(baseline.roomId)?.has(baseline.id) ?? false;
+    return this.completionScannedAngles.get(baseline.roomId)?.has(baseline.id) ?? false;
   }
 
   // ─── Public API: Baseline Localization ──────────────────────────
@@ -743,10 +748,20 @@ export class RoomDetector {
    * the embedding loop. This ensures coverage tracking reflects actual verified
    * comparisons, not just visual similarity.
    */
-  markAngleScanned(baselineId: string, roomId: string): void {
+  markAngleScanned(
+    baselineId: string,
+    roomId: string,
+    options?: { countsForCompletion?: boolean },
+  ): void {
     const roomAngles = this.scannedAngles.get(roomId);
     if (roomAngles) {
       roomAngles.add(baselineId);
+    }
+    if (options?.countsForCompletion !== false) {
+      const completionAngles = this.completionScannedAngles.get(roomId);
+      if (completionAngles) {
+        completionAngles.add(baselineId);
+      }
     }
   }
 
@@ -846,7 +861,7 @@ export class RoomDetector {
    */
   isInUnscannedCluster(baselineId: string, roomId: string): boolean {
     const members = this.getClusterMembers(baselineId);
-    const scanned = this.scannedAngles.get(roomId);
+    const scanned = this.completionScannedAngles.get(roomId);
     if (!scanned) return true;
     return !members.some((id) => scanned.has(id));
   }

@@ -33,6 +33,7 @@ import { colors } from "../lib/tokens";
 import type { Finding } from "../lib/inspection/types";
 import {
   SessionManager,
+  type CompletionTier,
   type InspectionMode,
 } from "../lib/inspection/session-manager";
 import { ComparisonManager } from "../lib/vision/comparison-manager";
@@ -520,15 +521,19 @@ export default function InspectionCameraScreen() {
 
           // UI-only credit: hierarchy parent/children get marked as "seen"
           // in the detector (green dots) but NOT in the session (no completion credit).
-          const hierarchy = roomDetectorRef.current?.getHierarchy(resolvedBaselineId);
-          if (hierarchy) {
-            if (hierarchy.parentId) {
-              roomDetectorRef.current?.markAngleScanned(hierarchy.parentId, resolvedRoomId);
+            const hierarchy = roomDetectorRef.current?.getHierarchy(resolvedBaselineId);
+            if (hierarchy) {
+              if (hierarchy.parentId) {
+                roomDetectorRef.current?.markAngleScanned(hierarchy.parentId, resolvedRoomId, {
+                  countsForCompletion: false,
+                });
+              }
+              for (const childId of hierarchy.childIds) {
+                roomDetectorRef.current?.markAngleScanned(childId, resolvedRoomId, {
+                  countsForCompletion: false,
+                });
+              }
             }
-            for (const childId of hierarchy.childIds) {
-              roomDetectorRef.current?.markAngleScanned(childId, resolvedRoomId);
-            }
-          }
         }
         updateCoverageUI(session, resolvedRoomId);
       }
@@ -654,10 +659,14 @@ export default function InspectionCameraScreen() {
         const hierarchy = roomDetectorRef.current?.getHierarchy(resolvedBaselineId);
         if (hierarchy) {
           if (hierarchy.parentId) {
-            roomDetectorRef.current?.markAngleScanned(hierarchy.parentId, resolvedRoomId);
+            roomDetectorRef.current?.markAngleScanned(hierarchy.parentId, resolvedRoomId, {
+              countsForCompletion: false,
+            });
           }
           for (const childId of hierarchy.childIds) {
-            roomDetectorRef.current?.markAngleScanned(childId, resolvedRoomId);
+            roomDetectorRef.current?.markAngleScanned(childId, resolvedRoomId, {
+              countsForCompletion: false,
+            });
           }
         }
         updateCoverageUI(session, resolvedRoomId);
@@ -918,6 +927,21 @@ export default function InspectionCameraScreen() {
       }
     },
     [],
+  );
+
+  const getEffectiveOverallCoverage = useCallback((session: SessionManager): number => {
+    const detectorCoverage = roomDetectorRef.current?.getOverallCoverage();
+    return detectorCoverage?.averagePercentage ?? session.getOverallCoverage();
+  }, []);
+
+  const getEffectiveCompletionTier = useCallback(
+    (session: SessionManager): CompletionTier => {
+      const coverage = getEffectiveOverallCoverage(session);
+      if (coverage >= 90) return "thorough";
+      if (coverage >= 50) return "standard";
+      return "minimum";
+    },
+    [getEffectiveOverallCoverage],
   );
 
   const activateRoom = useCallback(
@@ -1222,11 +1246,15 @@ export default function InspectionCameraScreen() {
                   const hierarchy = detector.getHierarchy(baselineId);
                   if (hierarchy) {
                     if (hierarchy.parentId) {
-                      detector.markAngleScanned(hierarchy.parentId, bRoomId);
+                      detector.markAngleScanned(hierarchy.parentId, bRoomId, {
+                        countsForCompletion: false,
+                      });
                       onDeviceCreditedRef.current.add(hierarchy.parentId);
                     }
                     for (const childId of hierarchy.childIds) {
-                      detector.markAngleScanned(childId, bRoomId);
+                      detector.markAngleScanned(childId, bRoomId, {
+                        countsForCompletion: false,
+                      });
                       onDeviceCreditedRef.current.add(childId);
                     }
                   }
@@ -1769,7 +1797,7 @@ export default function InspectionCameraScreen() {
         (total, result) => total + result.findings.length,
         0,
       ),
-      completionTier: session.getCompletionTier(),
+      completionTier: getEffectiveCompletionTier(session),
     });
 
     const eventLog = session.getEvents();
@@ -1779,7 +1807,7 @@ export default function InspectionCameraScreen() {
       await submitBulkResults(
         inspectionId,
         results,
-        session.getCompletionTier(),
+        getEffectiveCompletionTier(session),
         undefined,
         eventLog,
       );
@@ -1789,7 +1817,7 @@ export default function InspectionCameraScreen() {
         await enqueueBulkSubmission({
           inspectionId,
           results,
-          completionTier: session.getCompletionTier(),
+          completionTier: getEffectiveCompletionTier(session),
           events: eventLog,
         });
         Alert.alert(
@@ -1855,13 +1883,11 @@ export default function InspectionCameraScreen() {
       });
     }
 
-    const detectorCoverage = roomDetectorRef.current?.getOverallCoverage();
+    const effectiveOverallCoverage = getEffectiveOverallCoverage(session);
     const summaryData: SummaryData = {
       overallScore: session.getOverallScore(),
-      completionTier: session.getCompletionTier(),
-      overallCoverage: Math.round(
-        detectorCoverage?.averagePercentage ?? session.getOverallCoverage(),
-      ),
+      completionTier: getEffectiveCompletionTier(session),
+      overallCoverage: Math.round(effectiveOverallCoverage),
       durationMs: session.getDurationMs(),
       inspectionMode: inspectionMode,
       rooms: summaryRooms,
@@ -1876,7 +1902,15 @@ export default function InspectionCameraScreen() {
     } finally {
       isSubmittingRef.current = false;
     }
-  }, [navigation, inspectionId, propertyId, inspectionMode]);
+  }, [
+    navigation,
+    inspectionId,
+    propertyId,
+    inspectionMode,
+    getEffectiveCompletionTier,
+    getEffectiveOverallCoverage,
+    showCaptureHint,
+  ]);
 
   // Intercept Android hardware back button to prevent data loss
   useEffect(() => {
