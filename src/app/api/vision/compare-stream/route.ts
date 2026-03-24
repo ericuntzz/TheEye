@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { getDbUser, isValidUUID, isSafeUrl } from "@/lib/auth";
 import { verifyGeometry, analyzeWithAI, type InspectionMode, type GeometryOutcome } from "@/lib/vision/compare";
+import { rerankCandidateBaselinesByServerEmbedding } from "@/lib/vision/candidate-rerank";
 import { db } from "@/server/db";
 import { baselineImages, baselineVersions, inspections, rooms } from "@/server/schema";
 import { eq, and, inArray } from "drizzle-orm";
@@ -231,6 +232,30 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  let orderedCandidateBaselines = scopedCandidateBaselines;
+  if (
+    scopedCandidateBaselines?.length &&
+    scopedCandidateBaselines.some(
+      (candidate) => Array.isArray(candidate.embedding) && candidate.embedding.length > 0,
+    )
+  ) {
+    try {
+      orderedCandidateBaselines =
+        await rerankCandidateBaselinesByServerEmbedding(
+          Buffer.from(images[0], "base64"),
+          scopedCandidateBaselines,
+          {
+            allowPlaceholder: process.env.ALLOW_PLACEHOLDER_EMBEDDINGS === "1",
+          },
+        );
+    } catch (error) {
+      console.warn(
+        "[compare-stream] Server embedding reranking unavailable; using client candidate order:",
+        error,
+      );
+    }
+  }
+
   // Create SSE stream
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -277,7 +302,7 @@ export async function POST(request: NextRequest) {
           topCandidateIds: validatedTopCandidateIds,
           clientSimilarity: validatedClientSimilarity,
           userSelectedCandidateId: validatedUserSelectedCandidateId,
-          candidateBaselines: scopedCandidateBaselines,
+          candidateBaselines: orderedCandidateBaselines,
           userConfirmed: userConfirmed === true,
         };
 

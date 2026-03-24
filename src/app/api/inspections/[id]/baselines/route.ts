@@ -10,7 +10,7 @@ import {
   propertyConditions,
 } from "@/server/schema";
 import { eq, and, inArray, isNotNull } from "drizzle-orm";
-import { isPlaceholderModelVersion } from "@/lib/vision/embeddings";
+import { isPlaceholderModelVersion } from "@/lib/vision/embedding-model-version";
 
 // GET /api/inspections/[id]/baselines - Load all rooms with baseline images,
 // embeddings, items, and known conditions for inspection start

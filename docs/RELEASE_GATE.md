@@ -38,10 +38,14 @@ Run from repository root:
 npm run build
 npx tsc --noEmit
 cd mobile && npx tsc --noEmit && cd ..
-TOKEN=$(python3 get-token.py)
+TOKEN=$(node scripts/get-access-token.mjs)
 ./test-api.sh "$TOKEN"
 bash ./test-stress.sh "$TOKEN"
 ```
+
+`node scripts/get-access-token.mjs` expects `GATE_TEST_EMAIL` and
+`GATE_TEST_PASSWORD` to be set in your shell or local env file. Use a dedicated
+test account rather than a personal login.
 
 ## Known Process Risks
 1. Dev server state can become stale/corrupt; always test from a fresh server process.

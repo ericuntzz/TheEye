@@ -15,7 +15,6 @@ import {
   runVerificationCascade,
   type GeometricVerifyResult,
 } from "@/lib/vision/geometric-verify";
-import { generateEmbeddingFromBuffer } from "@/lib/vision/embeddings";
 
 export interface ComparisonFinding {
   category: "missing" | "moved" | "cleanliness" | "damage" | "inventory" | "operational" | "safety" | "restock" | "presentation";
@@ -116,6 +115,7 @@ export interface CompareImagesOptions {
     imageUrl: string;
     verificationImageUrl?: string | null;
     embedding?: number[] | null;
+    serverEmbeddingSimilarity?: number;
   }>;
 }
 
@@ -357,20 +357,6 @@ async function prepareImageData(
   return fetchImageAsBase64(input);
 }
 
-function cosineSimilarity(a: number[], b: number[]): number {
-  if (a.length !== b.length || a.length === 0) return Number.NEGATIVE_INFINITY;
-  let dot = 0;
-  let normA = 0;
-  let normB = 0;
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i];
-    normA += a[i] * a[i];
-    normB += b[i] * b[i];
-  }
-  const denom = Math.sqrt(normA) * Math.sqrt(normB);
-  return denom === 0 ? Number.NEGATIVE_INFINITY : dot / denom;
-}
-
 function scoreVerificationAttempt(result: GeometricVerifyResult | null): number {
   if (!result) return Number.NEGATIVE_INFINITY;
   return (
@@ -530,24 +516,6 @@ export async function verifyGeometry(
     }),
   );
 
-  const currentBuffer = currentFrames[0].buffer;
-
-  let currentEmbedding: number[] | undefined;
-  if (
-    candidateBaselines.length > 0 &&
-    candidateBaselines.some(
-      (candidate) => Array.isArray(candidate.embedding) && candidate.embedding.length > 0,
-    )
-  ) {
-    try {
-      currentEmbedding = await generateEmbeddingFromBuffer(currentBuffer, {
-        allowPlaceholder: process.env.ALLOW_PLACEHOLDER_EMBEDDINGS === "1",
-      });
-    } catch (error) {
-      console.warn("[compare] Server embedding reranking unavailable:", error);
-    }
-  }
-
   const unresolvedCandidates: VerificationCandidate[] =
     candidateBaselines.length > 0
       ? candidateBaselines.map((candidate) => ({
@@ -555,6 +523,7 @@ export async function verifyGeometry(
             imageUrl: candidate.imageUrl,
             verificationImageUrl: candidate.verificationImageUrl,
             embedding: candidate.embedding,
+            serverEmbeddingSimilarity: candidate.serverEmbeddingSimilarity,
           }))
       : [
             {
@@ -564,22 +533,6 @@ export async function verifyGeometry(
               embedding: null,
             },
           ];
-
-  if (currentEmbedding) {
-    unresolvedCandidates.sort((a, b) => {
-      const simA =
-        Array.isArray(a.embedding) && a.embedding.length === currentEmbedding!.length
-          ? cosineSimilarity(currentEmbedding!, a.embedding)
-          : Number.NEGATIVE_INFINITY;
-      const simB =
-        Array.isArray(b.embedding) && b.embedding.length === currentEmbedding!.length
-          ? cosineSimilarity(currentEmbedding!, b.embedding)
-          : Number.NEGATIVE_INFINITY;
-      a.serverEmbeddingSimilarity = simA;
-      b.serverEmbeddingSimilarity = simB;
-      return simB - simA;
-    });
-  }
 
   if (userSelectedCandidateId) {
     const selectedIdx = unresolvedCandidates.findIndex(

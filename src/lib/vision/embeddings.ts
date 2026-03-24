@@ -12,13 +12,15 @@
 import { createHash } from "crypto";
 import { existsSync } from "fs";
 import { join } from "path";
+import {
+  PLACEHOLDER_EMBEDDING_MODEL_VERSION,
+  REAL_EMBEDDING_MODEL_VERSION,
+} from "./embedding-model-version";
 import { fetchImageBuffer } from "./fetch-image";
 
 const MODEL_PATH = join(process.cwd(), "src/lib/vision/models/mobileclip-s0.onnx");
 const EMBEDDING_DIM = 512;
 const IMAGE_SIZE = 256; // MobileCLIP-S0 input size
-export const REAL_EMBEDDING_MODEL_VERSION = "mobileclip-s0-v1";
-export const PLACEHOLDER_EMBEDDING_MODEL_VERSION = "mobileclip-s0-placeholder-v1";
 
 // Singleton state
 type OnnxSession = {
@@ -47,10 +49,6 @@ export function getModelVersion(): string {
   return modelAvailable
     ? REAL_EMBEDDING_MODEL_VERSION
     : PLACEHOLDER_EMBEDDING_MODEL_VERSION;
-}
-
-export function isPlaceholderModelVersion(version: string | null | undefined): boolean {
-  return version === PLACEHOLDER_EMBEDDING_MODEL_VERSION;
 }
 
 /**

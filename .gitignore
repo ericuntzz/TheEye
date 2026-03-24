@@ -43,6 +43,7 @@ __pycache__/
 *$py.class
 *.so
 .Python
+get-token.py
 env/
 venv/
 .venv/

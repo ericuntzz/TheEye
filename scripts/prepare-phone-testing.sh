@@ -329,7 +329,7 @@ smoke_check_properties() {
   local property_id=""
   local smoke_name="Automation Smoke $(date +"%Y-%m-%d %H-%M-%S")"
 
-  token="$(cd "${ROOT_DIR}" && python3 ./get-token.py)"
+  token="$(cd "${ROOT_DIR}" && node ./scripts/get-access-token.mjs)"
   create_body="$(mktemp)"
   list_body="$(mktemp)"
   delete_body="$(mktemp)"

@@ -90,7 +90,7 @@ if [[ "${MODE}" == "health" ]]; then
   exit 0
 fi
 
-TOKEN="$(python3 ./get-token.py)"
+TOKEN="$(node ./scripts/get-access-token.mjs)"
 
 if [[ "${MODE}" == "integration" ]]; then
   BASE_URL="${BASE_URL}" ./test-api.sh "${TOKEN}"
