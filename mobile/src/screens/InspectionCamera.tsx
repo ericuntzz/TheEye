@@ -498,21 +498,24 @@ export default function InspectionCameraScreen() {
         activateRoom(session, resolvedBaseline.roomId, resolvedBaseline.roomName);
       }
 
+      // Skip if on-device credit already granted for this baseline
+      if (resolvedBaselineId && onDeviceCreditedRef.current.has(resolvedBaselineId)) {
+        // On-device path already handled coverage + haptics — just track pending analysis
+        return;
+      }
+
       // Grant coverage credit (directional hierarchy rules apply)
       if (resolvedBaselineId) {
         if (event.verificationMode === "user_confirmed_bypass") {
-          // Lower confidence — only credit the single baseline, no cluster/hierarchy expansion
           session.recordAngleScan(resolvedRoomId, resolvedBaselineId);
           roomDetectorRef.current?.markAngleScanned(resolvedBaselineId, resolvedRoomId);
         } else {
-          // Geometric verified — full cluster + hierarchy credit
           const clusterIds = roomDetectorRef.current?.getClusterMembers(resolvedBaselineId) || [resolvedBaselineId];
           const hierarchyIds: string[] = [];
           const hierarchy = roomDetectorRef.current?.getHierarchy(resolvedBaselineId);
           if (hierarchy) {
             if (hierarchy.parentId) hierarchyIds.push(hierarchy.parentId);
             if (hierarchy.childIds.length > 0) hierarchyIds.push(...hierarchy.childIds);
-            // required_detail children are NOT auto-credited (they stay in requiredChildIds)
           }
           const allCreditIds = new Set([...clusterIds, ...hierarchyIds]);
           for (const cid of allCreditIds) {
@@ -629,8 +632,9 @@ export default function InspectionCameraScreen() {
         activateRoom(session, resolvedBaseline.roomId, resolvedBaseline.roomName);
       }
 
-      // Grant coverage credit ONLY if not already granted by verified event
-      if (resolvedBaselineId && !alreadyCredited) {
+      // Grant coverage credit ONLY if not already granted by verified event or on-device credit
+      const onDeviceAlreadyCredited = resolvedBaselineId ? onDeviceCreditedRef.current.has(resolvedBaselineId) : false;
+      if (resolvedBaselineId && !alreadyCredited && !onDeviceAlreadyCredited) {
         // 1. Cluster credit (visually similar angles)
         const clusterIds = roomDetectorRef.current?.getClusterMembers(resolvedBaselineId) || [resolvedBaselineId];
 
