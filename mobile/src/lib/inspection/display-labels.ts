@@ -54,10 +54,10 @@ function formatGenericLabel(
   viewNumber?: string,
 ): string {
   const suffix = viewNumber ? ` ${viewNumber}` : "";
-  if (imageType === "overview") return `Room overview${suffix}`;
-  if (imageType === "required_detail") return `Close-up check${suffix}`;
-  if (imageType === "detail") return `Detail view${suffix}`;
-  return viewNumber ? `Area ${viewNumber}` : "Area to check";
+  if (imageType === "overview") return `Wide view${suffix}`;
+  if (imageType === "required_detail") return `Close-up${suffix}`;
+  if (imageType === "detail") return `Detail${suffix}`;
+  return viewNumber ? `Spot ${viewNumber}` : "Spot to check";
 }
 
 function getGenericLabelMatch(label: string): RegExpMatchArray | null {

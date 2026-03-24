@@ -64,17 +64,25 @@ function normalizeInspectionLabel(
     return detailSubject;
   }
 
+  // Type-aware fallbacks are more descriptive than numbered views
   if (imageType === "overview") {
-    return `${fallbackRoomName} overview`;
+    return `${fallbackRoomName} wide view`;
+  }
+  if (imageType === "required_detail" && detailSubject) {
+    return detailSubject;
   }
   if (imageType === "required_detail") {
     return `Close-up check ${fallbackIndex + 1}`;
   }
+  if (imageType === "detail" && detailSubject) {
+    return detailSubject;
+  }
   if (imageType === "detail") {
-    return `Detail view ${fallbackIndex + 1}`;
+    return `Detail spot ${fallbackIndex + 1}`;
   }
 
-  return `${fallbackRoomName} view ${fallbackIndex + 1}`;
+  // Last resort — at least give a spatial hint instead of just a number
+  return `${fallbackRoomName} spot ${fallbackIndex + 1}`;
 }
 
 function createStorageAdminClient(): SupabaseClient | null {
@@ -1003,7 +1011,7 @@ Return ONLY valid JSON (no other text) with this structure:
       "description": "Brief description of the room",
       "image_urls": ["urls of images showing this room"],
       "image_labels": {
-        "matching image url": "REQUIRED: 2-4 word label describing what the camera is pointing at. Examples: Bookshelf wall, Exercise equipment, Reading chair corner, Entry doorway, TV mount area. NEVER use generic labels like 'View 1' or 'Angle 2'. Describe the dominant visual anchor in the image."
+        "image_url_here": "Bookshelf wall"
       },
       "image_classifications": {
         "matching image url": {
@@ -1027,7 +1035,13 @@ Return ONLY valid JSON (no other text) with this structure:
 
 Analyze all images and group them by room. Be thorough — identify every significant item visible. If multiple images show the same room from different angles, group them together.
 
-CRITICAL: Every image MUST have an image_label. Labels must describe what the camera is pointing at in 2-4 words (e.g., "Bookshelf wall", "Exercise equipment", "Reading chair corner"). These labels are shown to inspectors during walkthroughs to guide them to the right spot. NEVER use generic labels like "View 1", "Angle 2", or "Room overview" — always describe the visual anchor (the most distinctive object or area visible). If two images show similar content, differentiate them: "Left bookshelf" vs "Right bookshelf", "Equipment front" vs "Equipment side".
+CRITICAL LABELING RULE — image_labels:
+Every image MUST have a label in image_labels. Each label MUST be 2-4 words describing the most prominent object or area the camera is pointing at.
+
+GOOD labels: "Treadmill and weights", "Bookshelf corner", "Desk workspace", "Recliner chair", "Wall shelves", "Exercise machine"
+BAD labels (NEVER use these): "View 1", "Area 2", "Angle 3", "Shot 4", "Room overview", "Detail view", "Standard view"
+
+The label must help a person find this exact spot in the room. Imagine telling someone "go stand where you can see the [label]" — the label must make that instruction clear. If two images show similar areas, differentiate them: "Left wall shelves" vs "Right wall shelves".
 
 For each image, also classify it in image_classifications:
 - "overview": shows the full room or a large section from a distance
