@@ -92,6 +92,10 @@ const LOCALIZATION_ROOM_SYNC_THRESHOLD = 0.68;
 const ON_DEVICE_COVERAGE_THRESHOLD_FIRST_MATCH = 0.42;
 const ON_DEVICE_COVERAGE_THRESHOLD_NORMAL = 0.48;
 const ON_DEVICE_COVERAGE_THRESHOLD_ROOM_CONFIRMED = 0.44;
+/** When only 1 effective angle remains, lower the threshold further.
+ *  The user is in the right room (confirmed), looking for a specific target.
+ *  Accept weaker matches to avoid "I'm literally pointing at it" frustration. */
+const ON_DEVICE_COVERAGE_THRESHOLD_FINAL_ANGLE = 0.38;
 const AUTO_CAPTURE_INTERVAL_MS = 500;
 
 type LocalizationState =
@@ -1405,11 +1409,27 @@ export default function InspectionCameraScreen() {
               // First-match boost guard: for multi-room, require room detection agreement
               const firstMatchAllowed = isSingleRoom ||
                 detector.getCurrentRoom() === locked.baseline.roomId;
-              const onDeviceThreshold = !hasFirstMatchRef.current && firstMatchAllowed
-                ? ON_DEVICE_COVERAGE_THRESHOLD_FIRST_MATCH
-                : roomIsConfident
-                  ? ON_DEVICE_COVERAGE_THRESHOLD_ROOM_CONFIRMED
-                  : ON_DEVICE_COVERAGE_THRESHOLD_NORMAL;
+
+              // Final-angle targeting: when only 1 effective angle remains in this room
+              // and the locked baseline is uncredited, use the lowest threshold.
+              // The user is clearly trying to capture this specific target.
+              const bRoomId = locked.baseline.roomId;
+              const roomCov = detector.getRoomCoverage(bRoomId);
+              const isFinalAngle =
+                roomIsConfident &&
+                roomCov &&
+                roomCov.total > 0 &&
+                (roomCov.total - roomCov.scanned) === 1 &&
+                !onDeviceCreditedRef.current.has(locked.baseline.id) &&
+                !detector.getCompletionScannedAngles(bRoomId).includes(locked.baseline.id);
+
+              const onDeviceThreshold = isFinalAngle
+                ? ON_DEVICE_COVERAGE_THRESHOLD_FINAL_ANGLE
+                : !hasFirstMatchRef.current && firstMatchAllowed
+                  ? ON_DEVICE_COVERAGE_THRESHOLD_FIRST_MATCH
+                  : roomIsConfident
+                    ? ON_DEVICE_COVERAGE_THRESHOLD_ROOM_CONFIRMED
+                    : ON_DEVICE_COVERAGE_THRESHOLD_NORMAL;
 
               const highConfidenceWalkingMatch =
                 locked.similarity >= onDeviceThreshold &&
@@ -1487,7 +1507,13 @@ export default function InspectionCameraScreen() {
                     showCaptureHint("Room coverage complete ✓");
                     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
                   } else if (isLastAngle) {
-                    showCaptureHint(`${displayLabel} captured — 1 view left`);
+                    // Get the remaining angle's label for the hint
+                    const remainingBaselines = (baselinesRef.current.find(r => r.roomId === bRoomId)?.baselines || [])
+                      .filter(b => !onDeviceCreditedRef.current.has(b.id) && !detector.getCompletionScannedAngles(bRoomId).includes(b.id));
+                    const remainingLabel = remainingBaselines.length === 1
+                      ? getInspectionDisplayLabel({ label: remainingBaselines[0].label, roomName: locked.baseline.roomName, metadata: remainingBaselines[0].metadata })
+                      : "1 view";
+                    showCaptureHint(`${displayLabel} captured — still need: ${remainingLabel}`);
                     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                   } else if (isHalfway) {
                     showCaptureHint(`${displayLabel} captured — halfway there (${scannedCount}/${totalAngles})`);
