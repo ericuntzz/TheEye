@@ -206,6 +206,10 @@ function mapInspectionToSummary(payload: {
       scores: [],
       findings: [],
     };
+    // NOTE: On reload, this uses raw baseline count (not cluster-effective count).
+    // Live inspection uses detector.getRoomProgress() which accounts for clustering.
+    // This may show slightly different coverage than the live UI showed.
+    // Full fix: persist effectiveAngles in bulk submission payload.
     const anglesTotal = room.baselineImages?.length || 0;
     const anglesScanned = Math.min(anglesTotal, bucket.baselineIds.size);
     const score =
@@ -223,8 +227,8 @@ function mapInspectionToSummary(payload: {
       coverage,
       anglesScanned,
       anglesTotal,
-      confirmedFindings: bucket.findings.length,
-      findings: bucket.findings,
+      confirmedFindings: bucket.findings.filter((f) => f.status !== "dismissed").length,
+      findings: bucket.findings.filter((f) => f.status !== "dismissed"),
     };
   });
 

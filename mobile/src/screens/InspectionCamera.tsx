@@ -1042,7 +1042,7 @@ export default function InspectionCameraScreen() {
               successHint: "AI room detection restored",
             });
           }
-        }, 1500);
+        }, 8000); // Wait 8s before reloading — gives iOS time to reclaim memory
       }
       // Force-reset any stuck comparisons to free buffered images
       comparisonRef.current?.forceResetStuckComparison();
@@ -2005,6 +2005,19 @@ export default function InspectionCameraScreen() {
           console.log(
             `[Telemetry] Room "${visit.roomName}": ${uncaptured.length}/${roomBaselineList.length} baselines uncaptured:`,
             uncaptured.map(b => `${b.label || b.id} (${b.metadata?.imageType || "standard"})`).join(", "),
+          );
+        }
+      }
+
+      // Also log rooms that were never visited at all
+      for (const roomEntry of baselinesRef.current) {
+        if (!state.visitedRooms.has(roomEntry.roomId)) {
+          session.recordEvent("unvisited_room_at_end", roomEntry.roomId, {
+            roomName: roomEntry.roomName,
+            totalBaselines: roomEntry.baselines.length,
+          });
+          console.log(
+            `[Telemetry] Room "${roomEntry.roomName}" was never visited (${roomEntry.baselines.length} baselines)`,
           );
         }
       }

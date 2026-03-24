@@ -54,10 +54,20 @@ async function readQueue(): Promise<PendingBulkSubmission[]> {
 
 async function writeQueue(queue: PendingBulkSubmission[]): Promise<void> {
   const file = getQueueFile();
-  if (!file.exists) {
-    file.create({ intermediates: true, overwrite: true });
+  // Atomic write: write to temp file, then move (rename is atomic on POSIX/iOS)
+  const tmpFile = new File(Paths.cache, `${QUEUE_FILE_NAME}.tmp`);
+  try {
+    if (!tmpFile.exists) {
+      tmpFile.create({ intermediates: true, overwrite: true });
+    }
+    tmpFile.write(JSON.stringify(queue));
+    // Move replaces the target atomically
+    tmpFile.move(file);
+  } catch (err) {
+    // Clean up temp file on failure
+    try { if (tmpFile.exists) tmpFile.delete(); } catch { /* ignore */ }
+    throw err;
   }
-  file.write(JSON.stringify(queue));
 }
 
 export function enqueueBulkSubmission(params: {
