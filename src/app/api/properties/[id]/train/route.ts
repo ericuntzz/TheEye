@@ -19,7 +19,7 @@ import {
 } from "@/lib/vision/embeddings";
 import { computeQualityScore } from "@/lib/vision/quality";
 import { dedupeNearDuplicateImages } from "@/lib/vision/keyframe-dedupe";
-import { fetchImageBuffer } from "@/lib/vision/fetch-image";
+import { fetchImageAsset, fetchImageBuffer } from "@/lib/vision/fetch-image";
 
 const KEYFRAME_DEDUPE_MIN_IMAGES = 4;
 const KEYFRAME_DEDUPE_MIN_KEEP = 3;
@@ -34,6 +34,7 @@ const GENERIC_IMAGE_LABEL_RE =
   /^(?:view|angle|area|shot|photo|image|picture|frame)\s*\d*$/i;
 const GENERIC_TYPED_IMAGE_LABEL_RE =
   /^(?:room overview|overview|detail(?: view)?|close[- ]?up(?: check)?)(?:\s*\d+)?$/i;
+const GENERIC_SUFFIX_LABEL_RE = /\b(?:view|angle|area|shot|photo|image|picture|frame|spot)\s+\d+$/i;
 
 function normalizeInspectionLabel(
   rawLabel: string | null | undefined,
@@ -83,6 +84,169 @@ function normalizeInspectionLabel(
 
   // Last resort — at least give a spatial hint instead of just a number
   return `${fallbackRoomName} spot ${fallbackIndex + 1}`;
+}
+
+function stripRoomNamePrefix(label: string, roomName: string): string {
+  const cleanedLabel = label.trim();
+  const cleanedRoom = roomName.trim();
+  if (!cleanedLabel || !cleanedRoom) return cleanedLabel;
+
+  const labelLower = cleanedLabel.toLowerCase();
+  const roomLower = cleanedRoom.toLowerCase();
+
+  for (const sep of [" - ", ": ", " – ", " "]) {
+    const prefix = `${roomLower}${sep}`;
+    if (labelLower.startsWith(prefix)) {
+      return cleanedLabel.slice(prefix.length).trim();
+    }
+  }
+
+  if (labelLower.startsWith(roomLower)) {
+    return cleanedLabel.slice(cleanedRoom.length).trim();
+  }
+
+  return cleanedLabel;
+}
+
+function isWeakInspectionLabel(
+  label: string | null | undefined,
+  roomName: string,
+): boolean {
+  const cleanedLabel = typeof label === "string" ? label.trim() : "";
+  if (!cleanedLabel) return true;
+
+  const shortened = stripRoomNamePrefix(cleanedLabel, roomName);
+  return (
+    GENERIC_IMAGE_LABEL_RE.test(cleanedLabel) ||
+    GENERIC_TYPED_IMAGE_LABEL_RE.test(cleanedLabel) ||
+    GENERIC_SUFFIX_LABEL_RE.test(cleanedLabel) ||
+    GENERIC_IMAGE_LABEL_RE.test(shortened) ||
+    GENERIC_TYPED_IMAGE_LABEL_RE.test(shortened) ||
+    GENERIC_SUFFIX_LABEL_RE.test(shortened)
+  );
+}
+
+async function maybeRefineRoomLabels(
+  roomName: string,
+  insertedBaselinesByUrl: Array<{ id: string; imageUrl: string }>,
+): Promise<void> {
+  if (insertedBaselinesByUrl.length < 2) {
+    return;
+  }
+
+  const storedBaselines = await db
+    .select({
+      id: baselineImages.id,
+      label: baselineImages.label,
+      imageUrl: baselineImages.imageUrl,
+    })
+    .from(baselineImages)
+    .where(inArray(baselineImages.id, insertedBaselinesByUrl.map((b) => b.id)));
+
+  const genericCount = storedBaselines.filter((b) =>
+    isWeakInspectionLabel(b.label, roomName),
+  ).length;
+
+  if (genericCount === 0) {
+    return;
+  }
+
+  console.log(
+    `[train] Room "${roomName}": ${genericCount}/${storedBaselines.length} weak labels — running label refinement pass`,
+  );
+
+  const labelRefineContent: Array<{
+    type: string;
+    text?: string;
+    source?: { type: string; media_type: string; data: string };
+  }> = [
+    {
+      type: "text",
+      text: `You are looking at ${storedBaselines.length} photos from a room called "${roomName}". For each photo, write a 2-4 word label describing what the camera is pointing at — the most distinctive object or area visible.
+
+GOOD labels: "Treadmill and weights", "Bookshelf corner", "Desk workspace", "Recliner chair", "Wall shelves"
+BAD labels: "View 1", "Area 2", "Overview", "Standard view"
+
+Return ONLY valid JSON with this exact structure:
+{
+  "labels": {
+    "image_url": "2-4 word anchor label"
+  }
+}`,
+    },
+  ];
+
+  for (const baseline of storedBaselines) {
+    try {
+      const asset = await fetchImageAsset(baseline.imageUrl);
+      if (asset) {
+        labelRefineContent.push(
+          { type: "text", text: `Image URL: ${baseline.imageUrl}` },
+          {
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: asset.contentType,
+              data: asset.buffer.toString("base64"),
+            },
+          },
+        );
+      }
+    } catch {
+      // Skip images that fail to load
+    }
+  }
+
+  const anthropicKey = process.env.CLAUDE_API_KEY;
+  if (!anthropicKey || labelRefineContent.length <= 1) {
+    return;
+  }
+
+  const labelRes = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    signal: AbortSignal.timeout(30000),
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": anthropicKey,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: process.env.ANTHROPIC_VISION_MODEL || "claude-sonnet-4-20250514",
+      max_tokens: 1024,
+      messages: [{ role: "user", content: labelRefineContent }],
+    }),
+  });
+
+  if (!labelRes.ok) {
+    return;
+  }
+
+  const labelData = await labelRes.json();
+  const rawText = labelData.content?.[0]?.text || "";
+  const start = rawText.indexOf("{");
+  const end = rawText.lastIndexOf("}") + 1;
+  const parsed = JSON.parse(rawText.substring(start, end));
+  const refinedLabels = parsed?.labels || {};
+
+  let updated = 0;
+  for (const baseline of storedBaselines) {
+    const refined = refinedLabels[baseline.imageUrl];
+    if (
+      typeof refined === "string" &&
+      refined.trim().length >= 3 &&
+      !isWeakInspectionLabel(refined, roomName)
+    ) {
+      await db
+        .update(baselineImages)
+        .set({ label: refined.trim().slice(0, 100) })
+        .where(eq(baselineImages.id, baseline.id));
+      updated++;
+    }
+  }
+
+  console.log(
+    `[train] Label refinement: updated ${updated}/${storedBaselines.length} labels for "${roomName}"`,
+  );
 }
 
 function createStorageAdminClient(): SupabaseClient | null {
@@ -565,116 +729,6 @@ export async function POST(
         }
       }
 
-      // ── Label quality gate: if >50% of labels are generic, run a focused second pass ──
-      if (insertedBaselinesByUrl.length >= 2) {
-        const storedBaselines = await db
-          .select({ id: baselineImages.id, label: baselineImages.label, imageUrl: baselineImages.imageUrl })
-          .from(baselineImages)
-          .where(inArray(baselineImages.id, insertedBaselinesByUrl.map(b => b.id)));
-
-        const genericCount = storedBaselines.filter(b =>
-          !b.label ||
-          GENERIC_IMAGE_LABEL_RE.test(b.label) ||
-          GENERIC_TYPED_IMAGE_LABEL_RE.test(b.label) ||
-          /\bview\s+\d+$/i.test(b.label) ||
-          /\bspot\s+\d+$/i.test(b.label),
-        ).length;
-
-        if (genericCount > storedBaselines.length * 0.5) {
-          console.log(`[train] Room "${roomName}": ${genericCount}/${storedBaselines.length} generic labels — running label refinement pass`);
-          try {
-            const labelRefineContent: Array<{ type: string; text?: string; source?: { type: string; media_type: string; data: string } }> = [
-              {
-                type: "text",
-                text: `You are looking at ${storedBaselines.length} photos from a room called "${roomName}". For each photo, write a 2-4 word label describing what the camera is pointing at — the most distinctive object or area visible.
-
-GOOD labels: "Treadmill and weights", "Bookshelf corner", "Desk workspace", "Recliner chair", "Wall shelves"
-BAD labels: "View 1", "Area 2", "Overview", "Standard view"
-
-Return ONLY valid JSON with this exact structure:
-{
-  "labels": {
-    "image_url": "2-4 word anchor label"
-  }
-}`,
-              },
-            ];
-
-            // Add each baseline's image
-            for (const baseline of storedBaselines) {
-              try {
-                const imgBuffer = await fetchImageBuffer(baseline.imageUrl);
-                if (imgBuffer) {
-                  labelRefineContent.push(
-                    { type: "text", text: `Image URL: ${baseline.imageUrl}` },
-                    {
-                      type: "image",
-                      source: {
-                        type: "base64",
-                        media_type: "image/jpeg",
-                        data: imgBuffer.toString("base64"),
-                      },
-                    },
-                  );
-                }
-              } catch {
-                // Skip images that fail to load
-              }
-            }
-
-            const anthropicKey = process.env.CLAUDE_API_KEY;
-            if (anthropicKey && labelRefineContent.length > 1) {
-              const labelRes = await fetch("https://api.anthropic.com/v1/messages", {
-                method: "POST",
-                signal: AbortSignal.timeout(30000),
-                headers: {
-                  "Content-Type": "application/json",
-                  "x-api-key": anthropicKey,
-                  "anthropic-version": "2023-06-01",
-                },
-                body: JSON.stringify({
-                  model: process.env.ANTHROPIC_VISION_MODEL || "claude-sonnet-4-20250514",
-                  max_tokens: 1024,
-                  messages: [{ role: "user", content: labelRefineContent }],
-                }),
-              });
-
-              if (labelRes.ok) {
-                const labelData = await labelRes.json();
-                const rawText = labelData.content?.[0]?.text || "";
-                try {
-                  const start = rawText.indexOf("{");
-                  const end = rawText.lastIndexOf("}") + 1;
-                  const parsed = JSON.parse(rawText.substring(start, end));
-                  const refinedLabels = parsed?.labels || {};
-
-                  let updated = 0;
-                  for (const baseline of storedBaselines) {
-                    const refined = refinedLabels[baseline.imageUrl];
-                    if (
-                      typeof refined === "string" &&
-                      refined.trim().length >= 3 &&
-                      !GENERIC_IMAGE_LABEL_RE.test(refined.trim()) &&
-                      !GENERIC_TYPED_IMAGE_LABEL_RE.test(refined.trim())
-                    ) {
-                      await db.update(baselineImages)
-                        .set({ label: refined.trim().slice(0, 100) })
-                        .where(eq(baselineImages.id, baseline.id));
-                      updated++;
-                    }
-                  }
-                  console.log(`[train] Label refinement: updated ${updated}/${storedBaselines.length} labels for "${roomName}"`);
-                } catch (parseErr) {
-                  console.warn("[train] Label refinement response parse failed:", parseErr);
-                }
-              }
-            }
-          } catch (err) {
-            console.warn("[train] Label refinement pass failed (non-fatal):", err);
-          }
-        }
-      }
-
       // If no specific images assigned, distribute available images
       if (baselineCount === 0 && imageUrls.length > 0) {
         const startIdx = Math.floor(
@@ -762,6 +816,12 @@ Return ONLY valid JSON with this exact structure:
               .where(eq(baselineImages.id, id));
           }
         }
+      }
+
+      try {
+        await maybeRefineRoomLabels(roomName, insertedBaselinesByUrl);
+      } catch (err) {
+        console.warn("[train] Label refinement pass failed (non-fatal):", err);
       }
 
       createdRooms.push({

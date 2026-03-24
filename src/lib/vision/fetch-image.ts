@@ -34,3 +34,34 @@ export async function fetchImageBuffer(
     return null;
   }
 }
+
+/**
+ * Fetch an image and preserve its response content type for downstream APIs.
+ * Returns null on failure (network error, timeout, unsafe URL).
+ */
+export async function fetchImageAsset(
+  imageUrl: string,
+  timeoutMs: number = DEFAULT_TIMEOUT_MS,
+): Promise<{ buffer: Buffer; contentType: string } | null> {
+  try {
+    if (!isSafeUrl(imageUrl)) {
+      console.warn("[fetch-image] Blocked unsafe URL:", imageUrl);
+      return null;
+    }
+    const res = await fetch(imageUrl, { signal: AbortSignal.timeout(timeoutMs) });
+    if (!res.ok) return null;
+    const arrayBuffer = await res.arrayBuffer();
+    if (arrayBuffer.byteLength === 0) {
+      console.warn("[fetch-image] Received empty image payload:", imageUrl);
+      return null;
+    }
+    return {
+      buffer: Buffer.from(arrayBuffer),
+      contentType: (res.headers.get("content-type") || "image/jpeg")
+        .split(";")[0]
+        .trim(),
+    };
+  } catch {
+    return null;
+  }
+}
