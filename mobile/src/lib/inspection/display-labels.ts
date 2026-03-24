@@ -51,11 +51,10 @@ function formatGenericLabel(
   viewNumber?: string,
 ): string {
   const suffix = viewNumber ? ` ${viewNumber}` : "";
-  if (imageType === "overview") return `Overview${suffix}`;
-  if (imageType === "detail" || imageType === "required_detail") {
-    return `Detail${suffix}`;
-  }
-  return `View${suffix}`;
+  if (imageType === "overview") return `Room overview${suffix}`;
+  if (imageType === "required_detail") return `Close-up check${suffix}`;
+  if (imageType === "detail") return `Detail view${suffix}`;
+  return `Area ${viewNumber || "view"}`;
 }
 
 export function getInspectionDisplayLabel(

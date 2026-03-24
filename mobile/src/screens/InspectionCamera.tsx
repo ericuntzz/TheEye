@@ -219,9 +219,14 @@ export default function InspectionCameraScreen() {
   const [userSelectedBaselineId, setUserSelectedBaselineId] = useState<string | null>(null);
   const [showTargetAssist, setShowTargetAssist] = useState(false);
   const [zoom, setZoom] = useState(0);
+  type WaypointState = "pending" | "captured" | "analyzing" | "issue_found";
   const [roomWaypoints, setRoomWaypoints] = useState<
-    Array<{ id: string; label: string | null; scanned: boolean; previewUrl?: string | null }>
+    Array<{ id: string; label: string | null; scanned: boolean; state?: WaypointState; previewUrl?: string | null }>
   >([]);
+  /** Tracks baselines currently being analyzed by AI (verified but no result yet) */
+  const analyzingBaselinesRef = useRef<Set<string>>(new Set());
+  /** Tracks baselines where AI found issues */
+  const issueBaselinesRef = useRef<Set<string>>(new Set());
   const cameraRef = useRef<CameraView>(null);
   const baseZoomRef = useRef(0);
 
@@ -533,6 +538,8 @@ export default function InspectionCameraScreen() {
           baselineId: resolvedBaselineId,
           startedAt: Date.now(),
         });
+        // Mark baseline as "analyzing" for tri-state waypoint display
+        analyzingBaselinesRef.current.add(resolvedBaselineId);
       }
 
       // Clear localization failure streak on any verified result
@@ -623,6 +630,14 @@ export default function InspectionCameraScreen() {
       if (comparisonId) {
         pendingAnalysesRef.current.delete(comparisonId);
         verifiedComparisonIdsRef.current.delete(comparisonId);
+      }
+
+      // Transition waypoint state: analyzing → captured or issue_found
+      if (resolvedBaselineId) {
+        analyzingBaselinesRef.current.delete(resolvedBaselineId);
+        if (result.findings && result.findings.length > 0) {
+          issueBaselinesRef.current.add(resolvedBaselineId);
+        }
       }
 
       if (result.status === "localization_failed") {
@@ -1048,6 +1063,13 @@ export default function InspectionCameraScreen() {
                 index,
               ),
               scanned: detectorScanned.has(b.id) || visit.anglesScanned.has(b.id),
+              state: issueBaselinesRef.current.has(b.id)
+                ? "issue_found" as WaypointState
+                : analyzingBaselinesRef.current.has(b.id)
+                  ? "analyzing" as WaypointState
+                  : (detectorScanned.has(b.id) || visit.anglesScanned.has(b.id))
+                    ? "captured" as WaypointState
+                    : "pending" as WaypointState,
               previewUrl: b.previewUrl || b.imageUrl || null,
             })),
           );
@@ -1928,6 +1950,33 @@ export default function InspectionCameraScreen() {
       roomDetectionTimerRef.current = null;
     }
 
+    // Telemetry: log stubborn uncaptured baselines for future optimization
+    const detector = roomDetectorRef.current;
+    if (detector) {
+      const state = session.getState();
+      for (const [roomId, visit] of state.visitedRooms) {
+        const completionScanned = new Set(detector.getCompletionScannedAngles(roomId));
+        const roomEntry = baselinesRef.current.find(rb => rb.roomId === roomId);
+        const roomBaselineList = roomEntry?.baselines || [];
+        const uncaptured = roomBaselineList.filter(b => !completionScanned.has(b.id));
+        if (uncaptured.length > 0) {
+          session.recordEvent("uncaptured_baselines_at_end", roomId, {
+            uncapturedCount: uncaptured.length,
+            totalBaselines: roomBaselineList.length,
+            capturedCount: completionScanned.size,
+            uncapturedIds: uncaptured.map(b => b.id),
+            uncapturedLabels: uncaptured.map(b => b.label || "unknown"),
+            uncapturedTypes: uncaptured.map(b => b.metadata?.imageType || "standard"),
+            inspectionDurationMs: Date.now() - (visit.enteredAt || 0),
+          });
+          console.log(
+            `[Telemetry] Room "${visit.roomName}": ${uncaptured.length}/${roomBaselineList.length} baselines uncaptured:`,
+            uncaptured.map(b => `${b.label || b.id} (${b.metadata?.imageType || "standard"})`).join(", "),
+          );
+        }
+      }
+    }
+
     // Clean up stale pending analyses (>90s)
     const now = Date.now();
     for (const [id, entry] of pendingAnalysesRef.current) {
@@ -2706,7 +2755,13 @@ export default function InspectionCameraScreen() {
         )}
 
       {/* Localization guidance */}
-      {!paused && !captureHint && localizationState !== "localized" && localizationState !== "capturing" && (
+      {!paused && !captureHint && localizationState !== "localized" && localizationState !== "capturing" && (() => {
+        // Suppress noisy guidance when room is mostly complete — the tracker UI is sufficient
+        const scannedWps = roomWaypoints.filter(w => w.scanned).length;
+        const totalWps = roomWaypoints.length;
+        if (totalWps > 0 && scannedWps / totalWps >= 0.8) return false;
+        return true;
+      })() && (
         <View style={styles.localizationGuide} pointerEvents="none">
           <Text style={styles.localizationGuideText}>
             {localizationState === "not_localized" && autoDetectUnavailableReason

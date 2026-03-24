@@ -2,10 +2,14 @@ import React, { useState } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, Modal } from "react-native";
 import { Image } from "expo-image";
 
+type WaypointState = "pending" | "captured" | "analyzing" | "issue_found";
+
 interface RoomWaypoint {
   id: string;
   label: string | null;
   scanned: boolean;
+  /** Tri-state: pending → captured → analyzing → issue_found */
+  state?: WaypointState;
   /** Preview image URL for last-angle mode */
   previewUrl?: string | null;
 }
@@ -48,11 +52,18 @@ export default function CoverageTracker({
   const capturedWaypoints = roomWaypoints?.filter((wp) => wp.scanned) ?? [];
   const visiblePendingWaypoints = pendingWaypoints.slice(0, 3);
   const hiddenPendingCount = Math.max(pendingWaypoints.length - visiblePendingWaypoints.length, 0);
+  const analyzingCount = capturedWaypoints.filter(w => w.state === "analyzing").length;
+  const issueCount = capturedWaypoints.filter(w => w.state === "issue_found").length;
+
   const trackerHeadline =
     totalCount <= 0
       ? "Scanning room"
       : remainingCount <= 0
-        ? "Room coverage complete"
+        ? (analyzingCount > 0
+            ? `Room covered · ${analyzingCount} analyzing`
+            : issueCount > 0
+              ? `Room covered · ${issueCount} issue${issueCount > 1 ? "s" : ""} found`
+              : "Room covered · Keep scanning for detail or tap End")
         : remainingCount === 1
           ? "1 view left in this room"
           : `${remainingCount} views left in this room`;
@@ -195,9 +206,14 @@ export default function CoverageTracker({
             Captured {capturedWaypoints.length}
           </Text>
           <View style={styles.capturedDotsRow}>
-            {capturedWaypoints.map((wp) => (
-              <View key={wp.id} style={[styles.dot, styles.dotScanned]} />
-            ))}
+            {capturedWaypoints.map((wp) => {
+              const state = wp.state || "captured";
+              const dotStyle =
+                state === "issue_found" ? styles.dotIssue
+                : state === "analyzing" ? styles.dotAnalyzing
+                : styles.dotScanned;
+              return <View key={wp.id} style={[styles.dot, dotStyle]} />;
+            })}
           </View>
         </View>
       )}
@@ -286,7 +302,13 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   dotScanned: {
-    backgroundColor: "#22c55e",
+    backgroundColor: "#22c55e", // green — captured + verified
+  },
+  dotAnalyzing: {
+    backgroundColor: "#3b82f6", // blue — captured, AI still processing
+  },
+  dotIssue: {
+    backgroundColor: "#f59e0b", // amber — issue found by AI
   },
   dotPending: {
     backgroundColor: "rgba(255,255,255,0.62)",
