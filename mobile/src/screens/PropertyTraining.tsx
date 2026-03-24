@@ -848,6 +848,7 @@ export default function PropertyTrainingScreen() {
       const result = await trainProperty(propertyId, mediaUploadIds, {
         signal: abortController.signal,
       });
+      trainingAbortRef.current = null;
       if (!isRunActive(currentRunId)) {
         return;
       }
@@ -856,6 +857,7 @@ export default function PropertyTrainingScreen() {
       setPhase("results");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (err) {
+      trainingAbortRef.current = null;
       if (!isRunActive(currentRunId)) {
         return;
       }

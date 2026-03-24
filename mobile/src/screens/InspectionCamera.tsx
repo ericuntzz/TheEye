@@ -389,7 +389,6 @@ export default function InspectionCameraScreen() {
   const captureHighResFrame = useCallback(async (): Promise<CapturedFrameData | null> => {
     if (!cameraRef.current || isCapturingRef.current) return null;
     isCapturingRef.current = true;
-    let photoUri: string | undefined;
     try {
       const photo = await cameraRef.current.takePictureAsync({
         quality: 0.7,
@@ -398,18 +397,11 @@ export default function InspectionCameraScreen() {
       if (!photo?.base64 || !photo.uri) {
         return null;
       }
-      photoUri = photo.uri;
-      const result = {
+      return {
         dataUri: `data:image/jpeg;base64,${photo.base64}`,
         uri: photo.uri,
       };
-      // Clean up temp file immediately — we have the base64 data in memory.
-      // This prevents file leaks if callers don't clean up.
-      FileSystem.deleteAsync(photo.uri, { idempotent: true }).catch(() => {});
-      return result;
     } catch {
-      // Clean up on error too
-      if (photoUri) FileSystem.deleteAsync(photoUri, { idempotent: true }).catch(() => {});
       return null;
     } finally {
       isCapturingRef.current = false;

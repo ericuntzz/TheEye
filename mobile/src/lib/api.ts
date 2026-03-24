@@ -51,14 +51,30 @@ function fetchWithTimeout(
   options: RequestInit,
   timeoutMs: number,
 ): Promise<Response> {
-  if (timeoutMs <= 0) return fetch(url, options);
-
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const externalSignal = options.signal;
+  let timeout: ReturnType<typeof setTimeout> | null = null;
 
-  return fetch(url, { ...options, signal: controller.signal }).finally(() =>
-    clearTimeout(timeout),
-  );
+  const abortFromExternalSignal = () => controller.abort();
+
+  if (externalSignal?.aborted) {
+    controller.abort();
+  } else if (externalSignal) {
+    externalSignal.addEventListener("abort", abortFromExternalSignal, {
+      once: true,
+    });
+  }
+
+  if (timeoutMs > 0) {
+    timeout = setTimeout(() => controller.abort(), timeoutMs);
+  }
+
+  return fetch(url, { ...options, signal: controller.signal }).finally(() => {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+    externalSignal?.removeEventListener("abort", abortFromExternalSignal);
+  });
 }
 
 /**
@@ -135,6 +151,9 @@ async function authFetch(path: string, options: FetchOptions = {}) {
     } catch (err) {
       // Retry on network/timeout errors
       if (err instanceof ApiError) throw err;
+      if ((err as Error).name === "AbortError" && fetchOptions.signal?.aborted) {
+        throw err;
+      }
       if (attempt < maxAttempts) {
         await delay(attempt * 1000);
         continue;
