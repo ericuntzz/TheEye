@@ -465,7 +465,7 @@ export default function InspectionSummaryScreen() {
                     ? "Needs attention"
                     : "Significant issues found"
               : data.rooms.length > 0
-                ? data.overallCoverage > 0
+                ? data.overallCoverage > 0 || data.rooms.some(r => r.anglesScanned > 0)
                   ? "Coverage captured; AI scoring unavailable"
                   : "No captured views yet"
                 : "No comparisons run"}
