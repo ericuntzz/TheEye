@@ -251,7 +251,10 @@ export class SessionManager {
   }
 
   /**
-   * Get coverage for a specific room.
+   * Get coverage for a specific room using raw anglesScanned count.
+   * @deprecated Use RoomDetector.getRoomCoverage() instead — it uses the
+   * effective progress model (cluster-aware, hierarchy-excluded).
+   * This method is retained only as a fallback when the detector is unavailable.
    */
   getRoomCoverage(roomId: string): number {
     const visit = this.state.visitedRooms.get(roomId);
@@ -261,8 +264,9 @@ export class SessionManager {
   }
 
   /**
-   * Get overall property coverage weighted by total baseline angles.
-   * This keeps a 1-angle room from counting the same as a 10-angle room.
+   * Get overall property coverage using raw anglesScanned counts.
+   * @deprecated Use RoomDetector.getOverallCoverage() instead — it uses the
+   * effective progress model. This method is retained as a fallback only.
    */
   getOverallCoverage(): number {
     if (this.totalAnglesPerRoom.size === 0) return 0;
@@ -280,7 +284,9 @@ export class SessionManager {
   }
 
   /**
-   * Determine current completion tier based on coverage.
+   * Determine completion tier from raw coverage.
+   * @deprecated Use getEffectiveCompletionTier() in InspectionCamera instead —
+   * it uses the detector's effective coverage model.
    */
   getCompletionTier(): CompletionTier {
     const coverage = this.getOverallCoverage();
