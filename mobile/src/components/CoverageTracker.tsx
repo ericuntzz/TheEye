@@ -63,7 +63,6 @@ export default function CoverageTracker({
 
       {totalCount > 0 && (
         <Text style={styles.roomProgressText} numberOfLines={2}>
-          {currentRoomName ? `${currentRoomName}: ` : ""}
           {scannedCount}/{totalCount} angles
           {roomCoverage !== null ? ` (${roomCoverage}%)` : ""}
         </Text>
@@ -144,12 +143,14 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
+    flexWrap: "wrap",
     paddingTop: 2,
   },
   waypointItem: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
+    maxWidth: "48%",
   },
   dot: {
     width: 7,
@@ -166,6 +167,7 @@ const styles = StyleSheet.create({
     color: "rgba(255,255,255,0.35)",
     fontSize: 11,
     fontWeight: "500",
+    flexShrink: 1,
   },
   dotLabelScanned: {
     color: "rgba(34,197,94,0.8)",

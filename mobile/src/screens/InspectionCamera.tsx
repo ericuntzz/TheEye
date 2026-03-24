@@ -141,6 +141,21 @@ function getLocalizationGuidance(
   }
 }
 
+function normalizeInspectionGuidance(guidance?: string | null): string {
+  const text = guidance?.trim();
+  if (!text) return "Adjusting - keep scanning";
+  const normalized = text.toLowerCase();
+  if (
+    normalized.includes("slightly different angle") ||
+    normalized.includes("could not be analyzed") ||
+    normalized.includes("try again") ||
+    normalized.includes("adjust your angle")
+  ) {
+    return "Adjusting - keep scanning";
+  }
+  return text;
+}
+
 function cosineSimilarity(
   a: ArrayLike<number>,
   b: ArrayLike<number>,
@@ -654,7 +669,10 @@ export default function InspectionCameraScreen() {
       if (result.status === "comparison_unavailable") {
         setLocalizationState("localized");
         setShowTargetAssist(false);
-        showCaptureHint(result.userGuidance || "That angle could not be analyzed. Try again.");
+        showCaptureHint(
+          normalizeInspectionGuidance(result.userGuidance) ||
+            "Adjusting - keep scanning",
+        );
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
         return;
       }
@@ -778,7 +796,7 @@ export default function InspectionCameraScreen() {
         }, 10_000);
       }
       if (status === "error") {
-        showCaptureHint("That angle could not be analyzed. Try again.");
+        showCaptureHint("Adjusting - keep scanning");
         if (event?.comparisonId) {
           pendingAnalysesRef.current.delete(event.comparisonId);
           verifiedComparisonIdsRef.current.delete(event.comparisonId);
