@@ -9,7 +9,10 @@ import {
   properties,
 } from "@/server/schema";
 import { eq, and, inArray } from "drizzle-orm";
-import { compareImages } from "@/lib/vision/compare";
+// NOTE: compareImages is loaded dynamically inside the POST handler to avoid
+// pulling heavy native deps (sharp, onnx) into GET/PATCH/DELETE at module-load
+// time, which would crash these endpoints in environments where the native
+// binaries are unavailable.
 
 // GET /api/inspections/[id] - Get inspection details with rooms
 export async function GET(
@@ -323,6 +326,7 @@ export async function POST(
     }
 
     // Compare images with Claude Vision API
+    const { compareImages } = await import("@/lib/vision/compare");
     const comparisonResult = await compareImages({
       baselineImage: baseline.imageUrl,
       currentImages: [currentImageUrl],

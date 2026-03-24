@@ -11,7 +11,19 @@
  * All thresholds are config-driven via environment variables for benchmark tuning.
  */
 
-import sharp from "sharp";
+// Dynamic import — sharp is a native binary that may not be available in all
+// serverless environments.  A static `import sharp from "sharp"` would crash
+// the entire module (and every API route that transitively imports it) if the
+// binary is missing.  Lazy-loading keeps the module importable everywhere and
+// only fails at the point where sharp is actually needed.
+let _sharpModule: ((input?: Buffer | Uint8Array | string) => any) | null = null;
+
+async function getSharp() {
+  if (!_sharpModule) {
+    _sharpModule = (await import("sharp")).default;
+  }
+  return _sharpModule;
+}
 
 // ─── Pluggable Interface ─────────────────────────────────────────
 
@@ -95,6 +107,7 @@ export async function imageToGrayscale(imageBuffer: Buffer): Promise<{
   width: number;
   height: number;
 }> {
+  const sharp = await getSharp();
   const { data, info } = await sharp(imageBuffer)
     // Respect EXIF orientation so training-derived verification assets
     // and live/current frames are normalized the same way.
