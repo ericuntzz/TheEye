@@ -110,8 +110,10 @@ const CLUSTER_SIMILARITY_THRESHOLD = 0.85;
 const MAX_CLUSTER_SIZE = 2;
 
 function getMinimumEffectiveAngleCount(rawBaselineCount: number): number {
-  if (rawBaselineCount >= 6) return 3;
-  if (rawBaselineCount >= 3) return 2;
+  if (rawBaselineCount <= 2) return rawBaselineCount;
+  // Walkthrough completion should require covering roughly half the trained anchors.
+  // This keeps a 7-photo room from collapsing to only 3 required matches.
+  if (rawBaselineCount >= 3) return Math.ceil(rawBaselineCount / 2);
   return rawBaselineCount;
 }
 
