@@ -101,7 +101,10 @@ function cosineSimilarity(a: number[], b: number[]): number {
 }
 
 /** Similarity threshold for clustering nearby baselines within the same room */
-const CLUSTER_SIMILARITY_THRESHOLD = 0.75;
+// Lowered from 0.75 to group wide-angle and medium-angle views of the same area.
+// Close-ups and wide shots of the same subject have ~0.4-0.6 embedding similarity;
+// 0.55 catches these while avoiding cross-room false clusters.
+const CLUSTER_SIMILARITY_THRESHOLD = 0.55;
 
 export class RoomDetector {
   private baselines: BaselineAngle[] = [];
@@ -676,6 +679,24 @@ export class RoomDetector {
    */
   getScannedAngles(roomId: string): string[] {
     return Array.from(this.scannedAngles.get(roomId) || []);
+  }
+
+  /**
+   * Get the total number of distinct angles (after clustering) for a room.
+   * Each cluster counts as one angle since scanning any member covers all.
+   */
+  getRoomAngleCount(roomId: string): number {
+    const roomBaselines = this.baselines.filter((b) => b.roomId === roomId);
+    const counted = new Set<string>();
+    let count = 0;
+    for (const b of roomBaselines) {
+      if (counted.has(b.id)) continue;
+      count++;
+      // Mark all cluster members as counted
+      const members = this.baselineClusters.get(b.id) || [b.id];
+      for (const m of members) counted.add(m);
+    }
+    return count;
   }
 
   /**

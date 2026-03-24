@@ -1212,7 +1212,13 @@ export default function InspectionCameraScreen() {
                     onDeviceCreditedRef.current.add(cid); // prevent re-credit
                   }
                   updateCoverageUI(session, bRoomId);
-                  showCaptureHint("View captured");
+
+                  // Show specific progress feedback so user knows exactly what happened
+                  const roomState = session.getState().visitedRooms.get(bRoomId);
+                  const scannedCount = roomState?.anglesScanned.size ?? 0;
+                  const totalAngles = detector.getRoomAngleCount(bRoomId) || 1;
+                  const label = locked.baseline.label || "View";
+                  showCaptureHint(`${label} captured (${scannedCount}/${totalAngles})`);
                   void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                   autoAdvanceIfRoomComplete(session, bRoomId);
                 }
