@@ -2554,6 +2554,22 @@ export default function InspectionCameraScreen() {
     : activeImageSource === "camera"
       ? null
       : activeImageSourceLabel;
+  const remainingRoomAngles = Math.max(roomAngles.total - roomAngles.scanned, 0);
+  const roomProgressSummary =
+    roomAngles.total > 0
+      ? remainingRoomAngles > 0
+        ? `${roomAngles.scanned} of ${roomAngles.total} angles · ${remainingRoomAngles} left`
+        : "Room coverage complete"
+      : currentRoom
+        ? "Finding saved views"
+        : "Scanning for room";
+  const pendingWaypoints = roomWaypoints.filter((waypoint) => !waypoint.scanned);
+  const primaryPendingWaypoint = pendingWaypoints[0] ?? null;
+  const bottomPrompt =
+    captureHint ||
+    (primaryPendingWaypoint && pendingWaypoints.length === 1
+      ? `Still needed: ${primaryPendingWaypoint.label || "1 remaining view"}`
+      : null);
 
   return (
     <View style={styles.container}>
@@ -2660,7 +2676,7 @@ export default function InspectionCameraScreen() {
         )}
 
       {/* Localization guidance */}
-      {!paused && localizationState !== "localized" && localizationState !== "capturing" && (
+      {!paused && !captureHint && localizationState !== "localized" && localizationState !== "capturing" && (
         <View style={styles.localizationGuide} pointerEvents="none">
           <Text style={styles.localizationGuideText}>
             {localizationState === "not_localized" && autoDetectUnavailableReason
@@ -2722,11 +2738,9 @@ export default function InspectionCameraScreen() {
                   </View>
                 ) : null}
               </View>
-              {roomAngles.total > 0 && (
-                <Text style={styles.angleCount} numberOfLines={2}>
-                  {roomAngles.scanned}/{roomAngles.total} angles
-                </Text>
-              )}
+              <Text style={styles.angleCount} numberOfLines={2}>
+                {roomProgressSummary}
+              </Text>
             </View>
 
             <View style={styles.recBadge}>
@@ -2769,9 +2783,9 @@ export default function InspectionCameraScreen() {
 
         {/* Bottom controls */}
         <SafeAreaView style={styles.bottomControls} edges={["bottom"]}>
-          {captureHint && (
+          {bottomPrompt && (
             <View style={styles.captureHintBubble}>
-              <Text style={styles.captureHintText}>{captureHint}</Text>
+              <Text style={styles.captureHintText}>{bottomPrompt}</Text>
             </View>
           )}
 
@@ -3104,12 +3118,12 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
     paddingHorizontal: 16,
     paddingTop: 8,
-    gap: 10,
+    gap: 12,
   },
   endButton: {
     backgroundColor: "rgba(0,0,0,0.65)",
-    borderRadius: 10,
-    paddingHorizontal: 16,
+    borderRadius: 12,
+    paddingHorizontal: 14,
     paddingVertical: 10,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.08)",
@@ -3121,13 +3135,13 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   roomBadge: {
-    backgroundColor: "rgba(0,0,0,0.65)",
-    borderRadius: 12,
+    backgroundColor: "rgba(2, 6, 23, 0.78)",
+    borderRadius: 14,
     paddingHorizontal: 18,
-    paddingVertical: 10,
+    paddingVertical: 12,
     alignItems: "flex-start",
     borderWidth: 1,
-    borderColor: "rgba(77,166,255,0.3)",
+    borderColor: "rgba(77,166,255,0.24)",
     flex: 1,
     minWidth: 0,
   },
@@ -3140,65 +3154,66 @@ const styles = StyleSheet.create({
   },
   roomName: {
     color: "#fff",
-    fontSize: 16,
-    fontWeight: "600",
+    fontSize: 17,
+    fontWeight: "700",
     flexShrink: 1,
     minWidth: 0,
   },
   detectModeBadge: {
-    backgroundColor: "rgba(255,255,255,0.15)",
-    borderRadius: 6,
-    paddingHorizontal: 6,
+    backgroundColor: "rgba(148,163,184,0.18)",
+    borderRadius: 999,
+    paddingHorizontal: 8,
     paddingVertical: 2,
   },
   detectModeBadgeAuto: {
-    backgroundColor: "rgba(34,197,94,0.25)",
+    backgroundColor: "rgba(59,130,246,0.2)",
   },
   detectModeText: {
-    color: "rgba(255,255,255,0.7)",
-    fontSize: 10,
+    color: "rgba(226,232,240,0.78)",
+    fontSize: 9,
     fontWeight: "600",
-    letterSpacing: 0.3,
+    letterSpacing: 0.4,
   },
   angleCount: {
-    color: colors.slate300,
+    color: "rgba(191,219,254,0.86)",
     fontSize: 12,
-    marginTop: 2,
-    fontWeight: "500",
+    marginTop: 6,
+    fontWeight: "600",
     width: "100%",
   },
   recBadge: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "rgba(0,0,0,0.65)",
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    gap: 6,
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(2,6,23,0.68)",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    gap: 5,
     borderWidth: 1,
-    borderColor: "rgba(239, 68, 68, 0.2)",
+    borderColor: "rgba(148,163,184,0.14)",
     flexShrink: 0,
   },
   recDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
     backgroundColor: colors.error,
   },
   recDotProcessing: {
     backgroundColor: colors.primary,
   },
   recText: {
-    color: colors.error,
-    fontSize: 12,
+    color: "rgba(255,255,255,0.82)",
+    fontSize: 11,
     fontWeight: "600",
-    letterSpacing: 0.5,
+    letterSpacing: 0.4,
   },
   coverageRow: {
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 16,
-    marginTop: 8,
+    marginTop: 10,
     gap: 8,
   },
   pauseOverlay: {
@@ -3237,17 +3252,18 @@ const styles = StyleSheet.create({
   },
   captureHintBubble: {
     marginBottom: 12,
-    backgroundColor: "rgba(15, 23, 42, 0.86)",
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    marginHorizontal: 16,
+    backgroundColor: "rgba(15, 23, 42, 0.9)",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.14)",
+    borderColor: "rgba(148,163,184,0.2)",
   },
   captureHintText: {
     color: "#fff",
     fontSize: 12,
-    fontWeight: "500",
+    fontWeight: "600",
   },
   captureButton: {
     width: 76,
@@ -3564,15 +3580,17 @@ const styles = StyleSheet.create({
     position: "absolute",
     bottom: "30%",
     alignSelf: "center",
-    backgroundColor: "rgba(0,0,0,0.65)",
-    borderRadius: 10,
+    backgroundColor: "rgba(15,23,42,0.8)",
+    borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 8,
     zIndex: 4,
+    maxWidth: "82%",
   },
   localizationGuideText: {
     color: "rgba(255,255,255,0.9)",
     fontSize: 13,
     fontWeight: "500",
+    textAlign: "center" as const,
   },
 });

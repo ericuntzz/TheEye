@@ -45,34 +45,47 @@ export default function CoverageTracker({
   const remainingCount = Math.max(totalCount - scannedCount, 0);
   const pendingWaypoints = roomWaypoints?.filter((wp) => !wp.scanned) ?? [];
   const capturedWaypoints = roomWaypoints?.filter((wp) => wp.scanned) ?? [];
+  const visiblePendingWaypoints = pendingWaypoints.slice(0, 3);
+  const hiddenPendingCount = Math.max(pendingWaypoints.length - visiblePendingWaypoints.length, 0);
+  const trackerHeadline =
+    totalCount <= 0
+      ? "Scanning room"
+      : remainingCount <= 0
+        ? "Room coverage complete"
+        : remainingCount === 1
+          ? "1 view left in this room"
+          : `${remainingCount} views left in this room`;
 
   return (
     <View style={styles.container}>
-      {/* Overall progress bar */}
-      <View style={styles.barRow}>
-        <View style={styles.barBackground}>
-          <View
-            style={[
-              styles.barFill,
-              {
-                width: `${clampedCoverage}%`,
-                backgroundColor: barColor,
-              },
-            ]}
-          />
-        </View>
+      <View style={styles.headerRow}>
+        <Text style={styles.headerText} numberOfLines={1}>
+          {trackerHeadline}
+        </Text>
         <Text style={[styles.percentText, { color: barColor }]}>
-          Overall {Math.round(clampedCoverage)}%
+          {Math.round(clampedCoverage)}% overall
         </Text>
       </View>
 
-      {totalCount > 0 && (
+      <View style={styles.barBackground}>
+        <View
+          style={[
+            styles.barFill,
+            {
+              width: `${clampedCoverage}%`,
+              backgroundColor: barColor,
+            },
+          ]}
+        />
+      </View>
+
+      {totalCount > 0 ? (
         <Text style={styles.roomProgressText} numberOfLines={2}>
-          {scannedCount}/{totalCount} angles
-          {roomCoverage !== null ? ` (${roomCoverage}%)` : ""}
-          {remainingCount > 0 ? ` - ${remainingCount} left` : ""}
+          {roomCoverage !== null
+            ? `${roomCoverage}% of this room captured`
+            : `${scannedCount}/${totalCount} angles captured`}
         </Text>
-      )}
+      ) : null}
 
       {/* Last-angle mode: when 1 effective angle remains, show preview thumbnail */}
       {pendingWaypoints.length === 1 && pendingWaypoints[0].previewUrl && (
@@ -84,12 +97,12 @@ export default function CoverageTracker({
             cachePolicy="memory-disk"
           />
           <View style={styles.lastAngleTextCol}>
-            <Text style={styles.sectionLabel}>Still needed</Text>
+            <Text style={styles.sectionLabel}>Final view</Text>
             <Text style={styles.lastAngleLabel} numberOfLines={2}>
               {pendingWaypoints[0].label || "1 remaining view"}
             </Text>
             <Text style={styles.lastAngleHint}>
-              Point camera at this area
+              Point the camera at this area next
             </Text>
           </View>
         </View>
@@ -98,9 +111,9 @@ export default function CoverageTracker({
       {/* Multiple remaining: show dot list */}
       {pendingWaypoints.length > 1 && (
         <>
-          <Text style={styles.sectionLabel}>Still needed</Text>
+          <Text style={styles.sectionLabel}>Next up</Text>
           <View style={styles.waypointsRow}>
-            {pendingWaypoints.map((wp) => (
+            {visiblePendingWaypoints.map((wp) => (
               <View key={wp.id} style={styles.waypointItem}>
                 <View style={[styles.dot, styles.dotPending]} />
                 {wp.label ? (
@@ -110,6 +123,13 @@ export default function CoverageTracker({
                 ) : null}
               </View>
             ))}
+            {hiddenPendingCount > 0 ? (
+              <View style={styles.moreRemainingPill}>
+                <Text style={styles.moreRemainingText}>
+                  +{hiddenPendingCount} more
+                </Text>
+              </View>
+            ) : null}
           </View>
         </>
       )}
@@ -117,7 +137,7 @@ export default function CoverageTracker({
       {/* Single remaining without preview: simple text */}
       {pendingWaypoints.length === 1 && !pendingWaypoints[0].previewUrl && (
         <>
-          <Text style={styles.sectionLabel}>Still needed</Text>
+          <Text style={styles.sectionLabel}>Final view</Text>
           <View style={styles.waypointItem}>
             <View style={[styles.dot, styles.dotPending]} />
             <Text style={styles.dotLabel} numberOfLines={2}>
@@ -147,45 +167,51 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     flexDirection: "column",
-    backgroundColor: "rgba(0,0,0,0.5)",
-    borderRadius: 10,
+    backgroundColor: "rgba(2, 6, 23, 0.72)",
+    borderRadius: 14,
     paddingHorizontal: 14,
-    paddingVertical: 8,
-    gap: 6,
+    paddingVertical: 10,
+    gap: 8,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.06)",
+    borderColor: "rgba(148,163,184,0.16)",
   },
-  barRow: {
+  headerRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    flexWrap: "wrap",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  headerText: {
+    color: "rgba(255,255,255,0.94)",
+    fontSize: 13,
+    fontWeight: "600",
+    flex: 1,
   },
   barBackground: {
-    flex: 1,
-    height: 5,
-    backgroundColor: "rgba(255,255,255,0.1)",
-    borderRadius: 3,
+    width: "100%",
+    height: 6,
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderRadius: 4,
     overflow: "hidden",
   },
   barFill: {
     height: "100%",
-    borderRadius: 3,
+    borderRadius: 4,
   },
   percentText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "600",
     minWidth: 0,
-    textAlign: "left",
+    textAlign: "right",
   },
   roomProgressText: {
-    color: "rgba(255,255,255,0.8)",
-    fontSize: 12,
+    color: "rgba(226,232,240,0.75)",
+    fontSize: 11,
     fontWeight: "500",
-    lineHeight: 17,
+    lineHeight: 15,
   },
   sectionLabel: {
-    color: "rgba(255,255,255,0.72)",
+    color: "rgba(191,219,254,0.78)",
     fontSize: 10,
     fontWeight: "700",
     letterSpacing: 0.8,
@@ -201,9 +227,15 @@ const styles = StyleSheet.create({
   waypointItem: {
     flexDirection: "row",
     alignItems: "flex-start",
-    gap: 4,
+    gap: 6,
     maxWidth: "48%",
     minWidth: "48%",
+    backgroundColor: "rgba(15,23,42,0.55)",
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: "rgba(148,163,184,0.12)",
   },
   dot: {
     width: 7,
@@ -215,16 +247,30 @@ const styles = StyleSheet.create({
     backgroundColor: "#22c55e",
   },
   dotPending: {
-    backgroundColor: "rgba(255,255,255,0.4)",
+    backgroundColor: "rgba(255,255,255,0.62)",
   },
   dotLabel: {
-    color: "rgba(255,255,255,0.6)",
+    color: "rgba(255,255,255,0.84)",
     fontSize: 11,
     fontWeight: "500",
     flexShrink: 1,
   },
   dotLabelScanned: {
     color: "rgba(34,197,94,0.7)",
+  },
+  moreRemainingPill: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: "rgba(148,163,184,0.16)",
+    borderWidth: 1,
+    borderColor: "rgba(148,163,184,0.22)",
+    alignSelf: "flex-start",
+  },
+  moreRemainingText: {
+    color: "rgba(255,255,255,0.78)",
+    fontSize: 10,
+    fontWeight: "600",
   },
   capturedSummaryRow: {
     flexDirection: "row",
@@ -234,7 +280,7 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
   },
   capturedSummaryText: {
-    color: "rgba(34,197,94,0.7)",
+    color: "rgba(134,239,172,0.82)",
     fontSize: 10,
     fontWeight: "700",
     letterSpacing: 0.8,
@@ -265,12 +311,12 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   lastAngleLabel: {
-    color: "rgba(255,255,255,0.85)",
+    color: "rgba(255,255,255,0.92)",
     fontSize: 13,
-    fontWeight: "600",
+    fontWeight: "700",
   },
   lastAngleHint: {
-    color: "rgba(255,255,255,0.5)",
+    color: "rgba(191,219,254,0.68)",
     fontSize: 11,
     fontWeight: "400",
   },
