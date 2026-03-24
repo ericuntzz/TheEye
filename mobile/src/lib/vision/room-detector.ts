@@ -403,15 +403,11 @@ export class RoomDetector {
       }
     }
 
-    for (const baseline of roomBaselines) {
-      if (baseline.metadata?.imageType === "required_detail") {
-        continue;
-      }
-      const hierarchy = this.baselineHierarchy.get(baseline.id);
-      if (hierarchy?.parentId) {
-        union(baseline.id, hierarchy.parentId);
-      }
-    }
+    // NOTE: hierarchy parent-child links are intentionally NOT unioned here.
+    // Hierarchy credit expands scannedAngles (green dots in UI) but should NOT
+    // collapse the effective angle count for completion. An overview match should
+    // not make detail baselines count as "done" for progress purposes.
+    // Only cluster peers (genuinely similar angles) reduce the required count.
 
     const totalRoots = new Set<string>();
     for (const baseline of roomBaselines) {
