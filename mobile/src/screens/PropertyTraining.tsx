@@ -691,6 +691,30 @@ export default function PropertyTrainingScreen() {
     return frames;
   }, []);
 
+  const hasUsableVideoTrainingFrames = useCallback(async () => {
+    if (captures.some((capture) => capture.type === "photo")) {
+      return true;
+    }
+
+    const videos = captures.filter((capture) => capture.type === "video");
+    if (videos.length === 0) {
+      return false;
+    }
+
+    for (const video of videos) {
+      const keyframeUris = await extractVideoKeyframeUris(video.uri);
+      try {
+        if (keyframeUris.length > 0) {
+          return true;
+        }
+      } finally {
+        keyframeUris.forEach((uri) => deleteLocalMedia(uri));
+      }
+    }
+
+    return false;
+  }, [captures, deleteLocalMedia, extractVideoKeyframeUris]);
+
   const handleCancelProcessing = useCallback(() => {
     if (phase !== "uploading" && phase !== "training") return;
     cancelRequestedRef.current = true;
@@ -726,29 +750,42 @@ export default function PropertyTrainingScreen() {
 
         const capture = captures[i];
         setUploadProgress({ current: progressCurrent, total });
-
-        // Skip if already uploaded in a previous attempt
         const existingIds = uploadedIdsRef.current.get(capture.id);
-        if (existingIds && existingIds.length > 0) {
-          mediaUploadIds.push(...existingIds);
-          progressCurrent += existingIds.length;
+        const uploadedForCapture = existingIds ? [...existingIds] : [];
+        const hasReusableUpload =
+          capture.type === "photo"
+            ? uploadedForCapture.length > 0
+            : uploadedForCapture.length > 1;
+
+        // Reuse fully uploaded captures on retry, but do not skip video keyframe extraction
+        // if only the archive video made it up in a prior attempt.
+        if (hasReusableUpload) {
+          mediaUploadIds.push(...uploadedForCapture);
+          uploadedImageCount +=
+            capture.type === "photo"
+              ? uploadedForCapture.length
+              : Math.max(uploadedForCapture.length - 1, 0);
+          progressCurrent += uploadedForCapture.length;
           setUploadProgress({ current: progressCurrent, total });
           continue;
         }
 
-        const uploadedForCapture: string[] = [];
-
         if (capture.type === "video") {
-          const videoResult = await uploadVideoFile(
-            capture.uri,
-            propertyId,
-            `training-video-${i + 1}.mp4`,
-          );
-          uploadedForCapture.push(videoResult.id);
-          mediaUploadIds.push(videoResult.id);
+          let videoId = uploadedForCapture[0];
+          if (!videoId) {
+            const videoResult = await uploadVideoFile(
+              capture.uri,
+              propertyId,
+              `training-video-${i + 1}.mp4`,
+            );
+            videoId = videoResult.id;
+            uploadedForCapture.push(videoId);
+          }
+
+          mediaUploadIds.push(videoId);
           progressCurrent += 1;
           setUploadProgress({ current: progressCurrent, total });
-          // Save partial progress so video isn't re-uploaded on retry
+          // Save partial progress so the raw video isn't re-uploaded on retry.
           uploadedIdsRef.current.set(capture.id, [...uploadedForCapture]);
 
           const keyframeUris = await extractVideoKeyframeUris(capture.uri);
@@ -846,7 +883,7 @@ export default function PropertyTrainingScreen() {
     }
   }, [captures, deleteCapturedFiles, extractVideoKeyframeUris, isRunActive, propertyId]);
 
-  const handleDoneCapturing = useCallback(() => {
+  const handleDoneCapturing = useCallback(async () => {
     const hasVideosWithKeyframes =
       videoThumbnailsRef.current &&
       captures.some((c) => c.type === "video");
@@ -871,6 +908,15 @@ export default function PropertyTrainingScreen() {
       return;
     }
 
+    const hasUsableFrames = await hasUsableVideoTrainingFrames();
+    if (!hasUsableFrames) {
+      Alert.alert(
+        "No Training Frames Available",
+        "These videos did not produce usable training frames. Capture at least one photo, or reinstall the latest iOS dev client before training.",
+      );
+      return;
+    }
+
     Alert.alert(
       isAddMore ? "Add to Training" : "Start Training",
       `Upload ${captures.length} item${captures.length !== 1 ? "s" : ""} and ${isAddMore ? "re-train" : "train"} AI on this property? This may take a minute.`,
@@ -879,7 +925,7 @@ export default function PropertyTrainingScreen() {
         { text: isAddMore ? "Re-train" : "Train", style: "default", onPress: handleUploadAndTrain },
       ],
     );
-  }, [captures.length, isAddMore, handleUploadAndTrain]);
+  }, [captures, hasUsableVideoTrainingFrames, isAddMore, handleUploadAndTrain]);
 
   // ──── Intro Phase ────
   if (phase === "intro") {
