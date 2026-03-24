@@ -522,26 +522,6 @@ export class ComparisonManager {
   }
 
   /**
-   * Fallback batch parser: parse all SSE events from a complete text response.
-   * Used when ReadableStream is not available.
-   */
-  private parseSSEBatch(
-    text: string,
-    context: ComparisonContext,
-    isStale: () => boolean,
-  ): boolean {
-    let receivedResult = false;
-    const sseEvents = text.split("\n\n");
-    for (const event of sseEvents) {
-      if (!event.trim()) continue;
-      const parsed = this.parseSingleSSEEvent(event, context, isStale);
-      if (parsed === "result") receivedResult = true;
-      if (parsed === "error") return false;
-    }
-    return receivedResult;
-  }
-
-  /**
    * Burst capture: 2 high-res frames separated by burstDelayMs.
    * The delay enables motion detection (running water shows specular shifts).
    */

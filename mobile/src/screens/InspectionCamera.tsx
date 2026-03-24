@@ -52,6 +52,7 @@ import {
   enqueueBulkSubmission,
   flushBulkSubmissionQueue,
 } from "../lib/inspection/offline-bulk-queue";
+import { getInspectionDisplayLabel } from "../lib/inspection/display-labels";
 import type { ImageSourceType } from "../lib/image-source/types";
 import { InspectionAnnouncer } from "../lib/audio/inspection-announcer";
 
@@ -966,11 +967,20 @@ export default function InspectionCameraScreen() {
           });
 
           // Update waypoint data for CoverageTracker
+          // Use detector's scannedAngles (includes hierarchy UI credit) for dot display
+          const detectorScanned = new Set(roomDetectorRef.current?.getScannedAngles(roomId) || []);
           setRoomWaypoints(
-            (roomBaselines.baselines || []).map((b) => ({
+            (roomBaselines.baselines || []).map((b, index) => ({
               id: b.id,
-              label: b.label || null,
-              scanned: visit.anglesScanned.has(b.id),
+              label: getInspectionDisplayLabel(
+                {
+                  label: b.label,
+                  roomName: roomBaselines.roomName,
+                  metadata: b.metadata,
+                },
+                index,
+              ),
+              scanned: detectorScanned.has(b.id) || visit.anglesScanned.has(b.id),
             })),
           );
         }
@@ -1329,13 +1339,12 @@ export default function InspectionCameraScreen() {
                   const roomProgress = detector.getRoomProgress(bRoomId);
                   const scannedCount = roomProgress.scanned;
                   const totalAngles = roomProgress.total || 1;
-                  const rawLabel = locked.baseline.label || "View";
-                  // Strip room name prefix for a cleaner hint (e.g., "view 6" not "Home Office/Exercise Room view 6")
-                  const roomName = locked.baseline.roomName || "";
-                  const shortLabel = roomName && rawLabel.startsWith(roomName)
-                    ? rawLabel.slice(roomName.length).trim() || rawLabel
-                    : rawLabel;
-                  showCaptureHint(`${shortLabel} captured (${scannedCount}/${totalAngles})`);
+                  const displayLabel = getInspectionDisplayLabel({
+                    label: locked.baseline.label,
+                    roomName: locked.baseline.roomName,
+                    metadata: locked.baseline.metadata,
+                  });
+                  showCaptureHint(`${displayLabel} captured (${scannedCount}/${totalAngles})`);
                   void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                   autoAdvanceIfRoomComplete(session, bRoomId);
                 }
@@ -1491,12 +1500,12 @@ export default function InspectionCameraScreen() {
         return;
       }
 
-      // Check if all angles are scanned — notify but keep capturing.
-      // Even at 100% coverage, the user may still be scanning and we want
-      // to continue sending frames for AI analysis (finding detection).
-      const visit = state.visitedRooms.get(currentRoomId);
-      const allScanned = room.baselines.every(b => visit?.anglesScanned.has(b.id));
-      if (allScanned && autoCaptureEnabledRef.current) {
+      // Check if room is complete using detector's effective progress model
+      // (cluster-aware, hierarchy-excluded from completion).
+      // Keep capturing even at 100% for findings detection.
+      const effectiveRoomCoverage = roomDetectorRef.current?.getRoomCoverage(currentRoomId);
+      const roomComplete = effectiveRoomCoverage ? effectiveRoomCoverage.percentage >= 100 : false;
+      if (roomComplete && autoCaptureEnabledRef.current) {
         autoAdvanceIfRoomComplete(session, currentRoomId);
         // Don't return — keep capturing for findings even after coverage is complete
       }
@@ -1510,7 +1519,7 @@ export default function InspectionCameraScreen() {
       const allowWalkthroughMotion = true;
       if (
         !comparison.shouldTrigger(changeResult, {
-          allowInitialStillFrame: (visit?.anglesScanned.size || 0) === 0,
+          allowInitialStillFrame: (state.visitedRooms.get(currentRoomId)?.anglesScanned.size || 0) === 0,
           allowWalkthroughMotion,
         })
       ) {
@@ -2197,7 +2206,9 @@ export default function InspectionCameraScreen() {
       return;
     }
 
-    showCaptureHint(`Capturing ${resolved.label || "selected view"}...`);
+    showCaptureHint(
+      `Capturing ${getInspectionDisplayLabel(resolved)}...`,
+    );
 
     const {
       data: { session: authSession },
@@ -2473,10 +2484,10 @@ export default function InspectionCameraScreen() {
                 const isSelected = userSelectedBaselineId === candidate.baselineId;
                 const isMultiRoom = baselinesRef.current.length > 1;
                 // Multi-room: always lead with room name so cross-room candidates are distinguishable
-                // Single-room: use baseline label or generic "View N"
+                // Single-room: use the most meaningful baseline label available.
                 const viewLabel = isMultiRoom
                   ? (baseline.roomName || `Room ${idx + 1}`)
-                  : (baseline.label || `View ${idx + 1}`);
+                  : getInspectionDisplayLabel(baseline, idx);
 
                 return (
                   <TouchableOpacity
