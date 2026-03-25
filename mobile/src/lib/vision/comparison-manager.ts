@@ -74,7 +74,7 @@ export interface ComparisonManagerConfig {
 
 const DEFAULT_CONFIG: ComparisonManagerConfig = {
   minIntervalMs: 800,
-  maxConcurrent: 3,
+  maxConcurrent: 5,
   burstDelayMs: 250,
   manualMinIntervalMs: 600,
 };

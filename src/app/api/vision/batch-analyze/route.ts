@@ -1,0 +1,234 @@
+import { NextRequest, NextResponse } from "next/server";
+import { getDbUser } from "@/lib/auth";
+
+/**
+ * POST /api/vision/batch-analyze
+ *
+ * Batch scene analysis endpoint. Accepts multiple frames from a room
+ * and sends them all to Claude in a single call for holistic analysis.
+ * This gives Claude full spatial context to detect changes that are
+ * only visible when comparing across multiple angles simultaneously.
+ *
+ * Body: {
+ *   roomId: string,
+ *   roomName: string,
+ *   frames: Array<{
+ *     currentImage: string (base64 data URI),
+ *     baselineUrl: string,
+ *     baselineId: string,
+ *     label?: string,
+ *   }>,
+ *   inspectionMode?: string,
+ *   knownConditions?: string[],
+ * }
+ */
+export async function POST(request: NextRequest) {
+  try {
+    const dbUser = await getDbUser();
+    if (!dbUser) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    let body: {
+      roomId?: string;
+      roomName?: string;
+      frames?: Array<{
+        currentImage: string;
+        baselineUrl: string;
+        baselineId: string;
+        label?: string;
+      }>;
+      inspectionMode?: string;
+      knownConditions?: string[];
+    };
+
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+    }
+
+    const { roomName, frames, inspectionMode = "turnover", knownConditions = [] } = body;
+
+    if (!roomName || !frames || !Array.isArray(frames) || frames.length === 0) {
+      return NextResponse.json(
+        { error: "roomName and frames array are required" },
+        { status: 400 },
+      );
+    }
+
+    // Limit batch size to prevent abuse
+    const maxFrames = 10;
+    const batchFrames = frames.slice(0, maxFrames);
+
+    const anthropicKey = process.env.CLAUDE_API_KEY;
+    if (!anthropicKey) {
+      return NextResponse.json(
+        { error: "AI unavailable" },
+        { status: 503 },
+      );
+    }
+
+    // Build multi-image prompt for Claude
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const content: any[] = [
+      {
+        type: "text",
+        text: `You are a Master Home Inspector analyzing ${batchFrames.length} views of "${roomName}" in a luxury vacation rental. You have BOTH baseline images (how the room should look) AND current images (how it looks now) for each angle.
+
+ANALYZE ALL IMAGES HOLISTICALLY. Look for:
+1. Items that moved between angles (visible in one baseline but in a different position in current)
+2. Items that are missing entirely (present in baselines but absent in all current images)
+3. New items that appeared (not in any baseline but visible in current images)
+4. Damage, wear, or condition changes visible across any angle
+5. Cleanliness and presentation issues
+
+For each angle pair, compare the baseline and current images. Then cross-reference findings across ALL angles for consistency.
+
+${knownConditions.length > 0 ? `\nKNOWN CONDITIONS (do NOT re-alert on these):\n${knownConditions.map(c => `- ${c}`).join("\n")}` : ""}
+
+Return ONLY valid JSON:
+{
+  "findings": [
+    {
+      "category": "missing|moved|cleanliness|damage|inventory|operational|safety|restock|presentation",
+      "description": "Detailed description of the issue",
+      "severity": "cosmetic|maintenance|safety|urgent_repair|guest_damage",
+      "confidence": 0.0-1.0,
+      "findingCategory": "condition|presentation|restock",
+      "isClaimable": true/false,
+      "visibleInAngles": ["label1", "label2"]
+    }
+  ],
+  "sceneChanges": ["Brief description of each notable scene change"],
+  "readinessScore": 0-100,
+  "summary": "One sentence overall assessment"
+}`,
+      },
+    ];
+
+    // Add baseline + current image pairs
+    for (let i = 0; i < batchFrames.length; i++) {
+      const frame = batchFrames[i];
+      const angleLabel = frame.label || `Angle ${i + 1}`;
+
+      // Fetch baseline image
+      try {
+        const baselineRes = await fetch(frame.baselineUrl, {
+          signal: AbortSignal.timeout(15000),
+        });
+        if (baselineRes.ok) {
+          const baselineBuffer = await baselineRes.arrayBuffer();
+          const baselineBase64 = Buffer.from(baselineBuffer).toString("base64");
+          const baselineContentType = baselineRes.headers.get("content-type") || "image/jpeg";
+
+          content.push(
+            { type: "text", text: `\n--- ${angleLabel} (BASELINE - how it should look) ---` },
+            {
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: baselineContentType.split(";")[0].trim(),
+                data: baselineBase64,
+              },
+            },
+          );
+        }
+      } catch {
+        // Skip failed baseline fetches
+      }
+
+      // Add current image
+      const currentBase64 = frame.currentImage.replace(/^data:image\/\w+;base64,/, "");
+      content.push(
+        { type: "text", text: `--- ${angleLabel} (CURRENT - how it looks now) ---` },
+        {
+          type: "image",
+          source: {
+            type: "base64",
+            media_type: "image/jpeg",
+            data: currentBase64,
+          },
+        },
+      );
+    }
+
+    // Call Claude with all images
+    const aiModel = process.env.ANTHROPIC_VISION_MODEL || "claude-sonnet-4-20250514";
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      signal: AbortSignal.timeout(180000), // 3 minute timeout for batch
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": anthropicKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: aiModel,
+        max_tokens: 4096,
+        messages: [{ role: "user", content }],
+      }),
+    });
+
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => "");
+      console.error(`[batch-analyze] Claude API error: ${res.status}`, errBody.slice(0, 200));
+      return NextResponse.json(
+        { error: "AI analysis failed", findings: [], sceneChanges: [], readinessScore: null },
+        { status: 502 },
+      );
+    }
+
+    const data = await res.json();
+    const rawText = data.content?.[0]?.text;
+
+    if (!rawText) {
+      return NextResponse.json({
+        findings: [],
+        sceneChanges: [],
+        readinessScore: null,
+        summary: "No analysis returned",
+      });
+    }
+
+    // Parse response
+    try {
+      const parsed = JSON.parse(rawText);
+      return NextResponse.json({
+        findings: parsed.findings || [],
+        sceneChanges: parsed.sceneChanges || parsed.scene_changes || [],
+        readinessScore: parsed.readinessScore ?? parsed.readiness_score ?? null,
+        summary: parsed.summary || "",
+      });
+    } catch {
+      // Try to extract JSON from markdown
+      const start = rawText.indexOf("{");
+      const end = rawText.lastIndexOf("}") + 1;
+      if (start !== -1 && end > start) {
+        try {
+          const parsed = JSON.parse(rawText.substring(start, end));
+          return NextResponse.json({
+            findings: parsed.findings || [],
+            sceneChanges: parsed.sceneChanges || parsed.scene_changes || [],
+            readinessScore: parsed.readinessScore ?? parsed.readiness_score ?? null,
+            summary: parsed.summary || "",
+          });
+        } catch {
+          // Fall through
+        }
+      }
+      return NextResponse.json({
+        findings: [],
+        sceneChanges: [],
+        readinessScore: null,
+        summary: "Failed to parse AI response",
+      });
+    }
+  } catch (error) {
+    console.error("[batch-analyze] Error:", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 },
+    );
+  }
+}
