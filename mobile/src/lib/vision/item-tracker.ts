@@ -286,7 +286,7 @@ export class ItemTracker {
         (item.importance === "critical" || item.importance === "high") &&
         this.confidence.get(item.id)?.verified,
     );
-    return hasCritical ? "minimum" : "minimum"; // Always at least minimum if any coverage
+    return "minimum";
   }
 
   /**

@@ -57,15 +57,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Validate payload size before processing — reject oversized requests early
+    // Validate payload size — reject oversized requests early
     const maxFrames = 10;
-    if (frames.length > 50) {
+    if (frames.length > maxFrames) {
       return NextResponse.json(
         { error: `Too many frames (${frames.length}). Maximum is ${maxFrames}.` },
         { status: 400 },
       );
     }
-    const batchFrames = frames.slice(0, maxFrames);
+    const batchFrames = frames;
 
     const anthropicKey = process.env.CLAUDE_API_KEY;
     if (!anthropicKey) {

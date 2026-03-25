@@ -163,13 +163,14 @@ export async function loadYoloModel(): Promise<YoloModelLoader> {
       const numClasses = 80;
       const expectedChannels = 4 + numClasses; // 4 bbox + 80 classes = 84
       let numDetections: number;
+      let isTransposed = false;
 
       if (dims && dims.length === 3 && dims[1] === expectedChannels) {
-        numDetections = dims[2];
+        numDetections = dims[2]; // Standard: [1, 84, N]
       } else if (dims && dims.length === 3 && dims[2] === expectedChannels) {
-        // Transposed output: [1, N, 84] — some ONNX exports use this layout
-        console.warn("[YOLO] Output is transposed [1, N, 84] — adjusting parser");
-        numDetections = dims[1];
+        numDetections = dims[1]; // Transposed: [1, N, 84]
+        isTransposed = true;
+        console.warn("[YOLO] Output is transposed [1, N, 84] — using row-major parsing");
       } else {
         console.warn("[YOLO] Unexpected output shape:", dims, "— falling back to 8400");
         numDetections = 8400;
@@ -180,11 +181,13 @@ export async function loadYoloModel(): Promise<YoloModelLoader> {
       const detections: DetectedObject[] = [];
 
       for (let i = 0; i < numDetections; i++) {
-        // Find best class
+        // Find best class — indexing depends on output layout
         let maxScore = 0;
         let maxClassId = 0;
         for (let c = 0; c < numClasses; c++) {
-          const score = data[(4 + c) * numDetections + i];
+          const score = isTransposed
+            ? data[i * expectedChannels + 4 + c]  // [1, N, 84] row-major
+            : data[(4 + c) * numDetections + i];  // [1, 84, N] column-major
           if (score > maxScore) {
             maxScore = score;
             maxClassId = c;
@@ -193,11 +196,11 @@ export async function loadYoloModel(): Promise<YoloModelLoader> {
 
         if (maxScore < YOLO_CONFIDENCE_THRESHOLD) continue;
 
-        // Extract bbox (center x, center y, width, height)
-        const cx = data[0 * numDetections + i];
-        const cy = data[1 * numDetections + i];
-        const w = data[2 * numDetections + i];
-        const h = data[3 * numDetections + i];
+        // Extract bbox — layout-aware
+        const cx = isTransposed ? data[i * expectedChannels + 0] : data[0 * numDetections + i];
+        const cy = isTransposed ? data[i * expectedChannels + 1] : data[1 * numDetections + i];
+        const w = isTransposed ? data[i * expectedChannels + 2] : data[2 * numDetections + i];
+        const h = isTransposed ? data[i * expectedChannels + 3] : data[3 * numDetections + i];
 
         detections.push({
           className: COCO_CLASSES[maxClassId] || `class_${maxClassId}`,

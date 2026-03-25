@@ -180,7 +180,7 @@ async function transcribeAudio(
     const formData = new FormData();
     formData.append("audio", {
       uri: audioUri,
-      type: "audio/m4a",
+      type: "audio/mp4",
       name: "voice-note.m4a",
     } as unknown as Blob); // RN FormData accepts this shape
 
