@@ -240,6 +240,10 @@ Return ONLY valid JSON with this exact structure:
 
   let updated = 0;
   for (const baseline of storedBaselines) {
+    // Only overwrite if the EXISTING label is weak — don't replace good first-pass
+    // labels like "Treadmill and weights" with different refinement labels
+    if (!isWeakInspectionLabel(baseline.label || "", roomName)) continue;
+
     const refined = refinedLabels[baseline.imageUrl];
     if (
       typeof refined === "string" &&

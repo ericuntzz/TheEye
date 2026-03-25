@@ -1164,6 +1164,17 @@ export default function InspectionCameraScreen() {
 
   const updateCoverageUI = useCallback(
     (session: SessionManager, roomId?: string) => {
+      // Sweep stale analyzing entries so blue dots don't persist forever
+      // (main sweep is in onVerified, but this catches cases where no new captures happen)
+      const sweepNow = Date.now();
+      for (const [id, entry] of pendingAnalysesRef.current) {
+        if (sweepNow - entry.startedAt > 90_000) {
+          analyzingBaselinesRef.current.delete(entry.baselineId);
+          pendingAnalysesRef.current.delete(id);
+          verifiedComparisonIdsRef.current.delete(id);
+        }
+      }
+
       const detectorCoverage = roomDetectorRef.current?.getOverallCoverage();
       setCoverage(
         Math.round(

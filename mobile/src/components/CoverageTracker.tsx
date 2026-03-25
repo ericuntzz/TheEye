@@ -55,15 +55,20 @@ export default function CoverageTracker({
   const analyzingCount = capturedWaypoints.filter(w => w.state === "analyzing").length;
   const issueCount = capturedWaypoints.filter(w => w.state === "issue_found").length;
 
+  const roomCompleteSubtext =
+    analyzingCount > 0 && issueCount > 0
+      ? `${analyzingCount} analyzing, ${issueCount} issue${issueCount > 1 ? "s" : ""} found`
+      : analyzingCount > 0
+        ? `${analyzingCount} analyzing`
+        : issueCount > 0
+          ? `${issueCount} issue${issueCount > 1 ? "s" : ""} found`
+          : "Keep scanning for detail or tap End";
+
   const trackerHeadline =
     totalCount <= 0
       ? "Scanning room"
       : remainingCount <= 0
-        ? (analyzingCount > 0
-            ? `Room covered · ${analyzingCount} analyzing`
-            : issueCount > 0
-              ? `Room covered · ${issueCount} issue${issueCount > 1 ? "s" : ""} found`
-              : "Room covered · Keep scanning for detail or tap End")
+        ? `Room covered · ${roomCompleteSubtext}`
         : remainingCount === 1
           ? "1 view left in this room"
           : `${remainingCount} views left in this room`;
