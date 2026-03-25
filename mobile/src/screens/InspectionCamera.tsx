@@ -146,6 +146,14 @@ function getLocalizationGuidance(
   }
 }
 
+/** Create a fingerprint for finding suppression.
+ *  Uses category + first 40 chars of lowered description to catch near-duplicates
+ *  like "Books added to shelf" and "Additional books added to shelf". */
+function findingFingerprint(category: string, description: string): string {
+  const normDesc = description.toLowerCase().replace(/[^a-z0-9 ]/g, "").trim().slice(0, 40);
+  return `${category}:${normDesc}`;
+}
+
 function normalizeInspectionGuidance(guidance?: string | null): string {
   const text = guidance?.trim();
   if (!text) return "Adjusting - keep scanning";
@@ -263,6 +271,9 @@ export default function InspectionCameraScreen() {
   const targetAssistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoCaptureEnabledRef = useRef(autoCaptureEnabled);
   const autoAllRoomsCompleteHintRef = useRef(false);
+  /** Fingerprints of dismissed findings — suppress similar findings for rest of inspection.
+   *  Fingerprint = normalized `category:description_prefix` to catch near-duplicates. */
+  const dismissedFingerprintsRef = useRef<Set<string>>(new Set());
   const borderPulseAnim = useRef(new Animated.Value(1)).current;
 
   // Pulse the border opacity when localized (green)
@@ -783,7 +794,17 @@ export default function InspectionCameraScreen() {
       }
 
       if (result.findings?.length > 0) {
-        for (const f of result.findings) {
+        // Filter out findings that match previously dismissed fingerprints
+        const newFindings = result.findings.filter((f) => {
+          const fp = findingFingerprint(f.category, f.description);
+          if (dismissedFingerprintsRef.current.has(fp)) {
+            console.log(`[InspectionCamera] Suppressed previously-dismissed finding: ${f.description.slice(0, 60)}`);
+            return false;
+          }
+          return true;
+        });
+
+        for (const f of newFindings) {
           const findingId = session.addFinding(resolvedRoomId, f);
           setFindings((prev) => [
             ...prev,
@@ -797,11 +818,18 @@ export default function InspectionCameraScreen() {
             },
           ]);
         }
+
+        if (newFindings.length === 0) {
+          // All findings were suppressed — treat as clean
+          if (resolvedBaselineId) {
+            autoAdvanceIfRoomComplete(session, resolvedRoomId);
+          }
+        } else {
         // Prominent finding notification — use double haptic + visible hint
         // so the user knows the AI found something even while focused on the camera
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-        const count = result.findings.length;
-        const firstDesc = result.findings[0].description;
+        const count = newFindings.length;
+        const firstDesc = newFindings[0].description;
         const truncated = firstDesc.length > 60 ? firstDesc.slice(0, 57) + "..." : firstDesc;
         showCaptureHint(
           count === 1
@@ -815,7 +843,7 @@ export default function InspectionCameraScreen() {
           if (currentRoomId) updateCoverageUI(session, currentRoomId);
         }
         if (activeImageSource !== "camera") {
-          const firstFinding = result.findings[0];
+          const firstFinding = newFindings[0];
           if (firstFinding) {
             void announcerRef.current.announceFinding(
               resolvedRoomName || "current room",
@@ -823,6 +851,7 @@ export default function InspectionCameraScreen() {
             );
           }
         }
+        } // close else (newFindings.length > 0)
       } else if (
         result.status === "localized_no_change" ||
         result.status === "localized_changed"
@@ -2664,14 +2693,38 @@ export default function InspectionCameraScreen() {
   }, [showCaptureHint]);
 
   const handleDismissFinding = useCallback((findingId: string, reason?: DismissReason) => {
-    sessionRef.current?.updateFindingStatus(findingId, "dismissed", reason ?? undefined);
+    const session = sessionRef.current;
+    session?.updateFindingStatus(findingId, "dismissed", reason ?? undefined);
+
+    // Record fingerprint for same-inspection suppression
+    const state = session?.getState();
+    if (state) {
+      for (const visit of state.visitedRooms.values()) {
+        const finding = visit.findings.find((f) => f.id === findingId);
+        if (finding) {
+          dismissedFingerprintsRef.current.add(
+            findingFingerprint(finding.category, finding.description),
+          );
+
+          // Known-condition promotion: add to room's known conditions
+          // so Claude Vision is told "don't alert on this" in future comparisons
+          if (reason === "known_issue" || reason === "not_accurate") {
+            const existing = knownConditionsByRoomRef.current.get(visit.roomId) || [];
+            existing.push(finding.description);
+            knownConditionsByRoomRef.current.set(visit.roomId, existing);
+          }
+          break;
+        }
+      }
+    }
+
     setFindings((prev) => prev.filter((f) => f.id !== findingId));
     const hint = reason === "not_accurate"
-      ? "Dismissed — feedback saved for review"
+      ? "Dismissed — won't alert on this again"
       : reason === "still_there"
         ? "Dismissed — item is still present"
         : reason === "known_issue"
-          ? "Dismissed — marked as known issue"
+          ? "Known issue noted — won't re-alert"
           : "Finding dismissed";
     showCaptureHint(hint);
   }, [showCaptureHint]);
