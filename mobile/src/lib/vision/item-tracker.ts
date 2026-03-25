@@ -12,15 +12,52 @@
  * - Works alongside YOLO detection + MobileCLIP room detection
  */
 
+/** Four-class inventory doctrine from technical architecture */
+export type InventoryClass = "fixed_structural" | "durable_movable" | "decorative" | "consumable";
+
 export interface ExpectedItem {
   id: string;
   name: string;
   category: string; // furniture, decor, appliance, fixture, etc.
+  /** Four-class inventory doctrine — drives alert routing */
+  inventoryClass: InventoryClass;
   importance: "critical" | "high" | "normal" | "low";
   roomId: string;
   /** Optional: specific COCO class name(s) that match this item */
   cocoClasses?: string[];
 }
+
+/** Map COCO classes to inventory doctrine classes */
+export const COCO_TO_INVENTORY_CLASS: Record<string, InventoryClass> = {
+  // Fixed/structural — deviations ALWAYS trigger alerts
+  "refrigerator": "fixed_structural",
+  "oven": "fixed_structural",
+  "microwave": "fixed_structural",
+  "sink": "fixed_structural",
+  "toilet": "fixed_structural",
+  "tv": "fixed_structural",
+  // Durable movable — tolerance for repositioning
+  "chair": "durable_movable",
+  "couch": "durable_movable",
+  "bed": "durable_movable",
+  "dining table": "durable_movable",
+  "laptop": "durable_movable",
+  "remote": "durable_movable",
+  "keyboard": "durable_movable",
+  "cell phone": "durable_movable",
+  // Decorative — high tolerance, only alert if completely absent
+  "potted plant": "decorative",
+  "clock": "decorative",
+  "vase": "decorative",
+  "teddy bear": "decorative",
+  "book": "decorative",
+  // Consumables — route to restock lane, not condition
+  "bottle": "consumable",
+  "cup": "consumable",
+  "wine glass": "consumable",
+  "toothbrush": "consumable",
+  "hair drier": "consumable",
+};
 
 export interface ItemConfidence {
   itemId: string;
@@ -72,9 +109,28 @@ const COCO_TO_PROPERTY_MAP: Record<string, string[]> = {
   "hair drier": ["hair dryer", "blow dryer"],
 };
 
+/** Event callback for integration with event-driven architecture */
+export type ItemEventCallback = (event: {
+  eventType: "item_verified" | "item_coverage_milestone";
+  roomId: string;
+  itemId?: string;
+  itemName?: string;
+  inventoryClass?: InventoryClass;
+  coverage?: number;
+  metadata?: Record<string, unknown>;
+}) => void;
+
+export type CompletionTier = "minimum" | "standard" | "thorough";
+
 export class ItemTracker {
-  private expectedItems: Map<string, ExpectedItem[]> = new Map(); // roomId -> items
-  private confidence: Map<string, ItemConfidence> = new Map(); // itemId -> confidence
+  private expectedItems: Map<string, ExpectedItem[]> = new Map();
+  private confidence: Map<string, ItemConfidence> = new Map();
+  private onEvent: ItemEventCallback | null = null;
+
+  /** Register event callback for event-driven architecture integration */
+  setEventCallback(callback: ItemEventCallback): void {
+    this.onEvent = callback;
+  }
 
   /**
    * Load expected items for a property from the training inventory.
@@ -140,6 +196,20 @@ export class ItemTracker {
         if (conf.confidence >= VERIFICATION_THRESHOLD) {
           conf.verified = true;
           gainedConfidence.push(item.id);
+
+          // Emit event for event-driven architecture
+          this.onEvent?.({
+            eventType: "item_verified",
+            roomId,
+            itemId: item.id,
+            itemName: item.name,
+            inventoryClass: item.inventoryClass,
+            metadata: {
+              confidence: conf.confidence,
+              framesSeen: conf.framesSeen,
+              bestConfidence: conf.bestConfidence,
+            },
+          });
         }
       }
     }
@@ -196,6 +266,66 @@ export class ItemTracker {
       total: totalItems,
       percentage: totalItems > 0 ? Math.round((totalVerified / totalItems) * 100) : 0,
     };
+  }
+
+  /**
+   * Get completion tier for a room (progressive completion per tech architecture).
+   * minimum: at least 1 critical/high item verified
+   * standard: 60%+ items verified
+   * thorough: 100% items verified
+   */
+  getCompletionTier(roomId: string): CompletionTier {
+    const coverage = this.getRoomCoverage(roomId);
+    if (coverage.total === 0) return "minimum";
+    if (coverage.percentage >= 100) return "thorough";
+    if (coverage.percentage >= 60) return "standard";
+    // Check if at least 1 critical/high item is verified
+    const roomItems = this.expectedItems.get(roomId) || [];
+    const hasCritical = roomItems.some(
+      (item) =>
+        (item.importance === "critical" || item.importance === "high") &&
+        this.confidence.get(item.id)?.verified,
+    );
+    return hasCritical ? "minimum" : "minimum"; // Always at least minimum if any coverage
+  }
+
+  /**
+   * Serialize state for persistence (event emission / offline queue).
+   * Returns a snapshot that can be stored in the bulk submission payload.
+   */
+  serializeState(): Array<{
+    roomId: string;
+    items: Array<{
+      itemId: string;
+      name: string;
+      inventoryClass: InventoryClass;
+      verified: boolean;
+      confidence: number;
+      framesSeen: number;
+    }>;
+    tier: CompletionTier;
+    percentage: number;
+  }> {
+    const result: ReturnType<ItemTracker["serializeState"]> = [];
+    for (const [roomId, items] of this.expectedItems) {
+      result.push({
+        roomId,
+        items: items.map((item) => {
+          const conf = this.confidence.get(item.id);
+          return {
+            itemId: item.id,
+            name: item.name,
+            inventoryClass: item.inventoryClass,
+            verified: conf?.verified ?? false,
+            confidence: conf?.confidence ?? 0,
+            framesSeen: conf?.framesSeen ?? 0,
+          };
+        }),
+        tier: this.getCompletionTier(roomId),
+        percentage: this.getRoomCoverage(roomId).percentage,
+      });
+    }
+    return result;
   }
 
   /**

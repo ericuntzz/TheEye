@@ -22,6 +22,8 @@ export interface BatchAnalysisConfig {
   apiUrl: string;
   maxConcurrentBatches: number;
   getAuthToken: () => Promise<string | null>;
+  /** Inspection mode for mode-specific Claude prompting */
+  inspectionMode?: "turnover" | "maintenance" | "owner_arrival" | "vacancy_check";
 }
 
 const DEFAULT_CONFIG: BatchAnalysisConfig = {
@@ -159,6 +161,7 @@ export class BatchAnalyzer {
         body: JSON.stringify({
           roomId,
           roomName,
+          inspectionMode: this.config.inspectionMode || "turnover",
           frames: frames.map((f) => ({
             currentImage: f.dataUri,
             baselineUrl: f.baselineUrl,

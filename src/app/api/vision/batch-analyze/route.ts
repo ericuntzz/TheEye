@@ -75,12 +75,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Mode-specific prompt additions
+    const modeInstructions: Record<string, string> = {
+      turnover: "This is a post-checkout TURNOVER inspection. Prioritize damage detection, missing items, and claim-ready evidence. Presentation findings are lower priority.",
+      maintenance: "This is a MAINTENANCE inspection. Focus on the specific reported issue and verify repair quality. Broad room scanning is secondary.",
+      owner_arrival: "This is an OWNER ARRIVAL inspection. ELEVATE presentation findings to primary importance — staging, cleanliness, premium readiness. The property must be perfect.",
+      vacancy_check: "This is a VACANCY CHECK. Apply higher tolerance for dust, minor cobwebs, seasonal debris. Focus on leaks, pests, HVAC, environmental issues.",
+    };
+
     // Build multi-image prompt for Claude
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const content: any[] = [
       {
         type: "text",
         text: `You are a Master Home Inspector analyzing ${batchFrames.length} views of "${roomName}" in a luxury vacation rental. You have BOTH baseline images (how the room should look) AND current images (how it looks now) for each angle.
+
+${modeInstructions[inspectionMode] || modeInstructions.turnover}
 
 ANALYZE ALL IMAGES HOLISTICALLY. Look for:
 1. Items that moved between angles (visible in one baseline but in a different position in current)
