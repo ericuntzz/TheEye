@@ -1601,6 +1601,28 @@ export default function InspectionCameraScreen() {
                       onDeviceCreditedRef.current.add(childId);
                     }
                   }
+
+                  // If this is an overview with detail children that were auto-credited,
+                  // suggest closer inspection after a brief delay (non-blocking)
+                  if (hierarchy && hierarchy.childIds.length > 0) {
+                    const detailLabels = hierarchy.childIds
+                      .map(cid => {
+                        const bl = (baselinesRef.current.find(r => r.roomId === bRoomId)?.baselines || [])
+                          .find(b => b.id === cid);
+                        return bl ? getInspectionDisplayLabel({ label: bl.label, roomName: locked.baseline.roomName, metadata: bl.metadata }) : null;
+                      })
+                      .filter(Boolean)
+                      .slice(0, 2); // Show at most 2 items
+                    if (detailLabels.length > 0) {
+                      // Queue a delayed hint after the main capture feedback
+                      setTimeout(() => {
+                        if (isMountedRef.current && !pausedRef.current) {
+                          showCaptureHint(`Tip: Get closer to check ${detailLabels.join(", ")}`);
+                        }
+                      }, 5000); // Show 5s after capture to not overlap
+                    }
+                  }
+
                   updateCoverageUI(session, bRoomId);
 
                   // Show specific progress feedback so user knows exactly what happened

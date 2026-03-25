@@ -36,6 +36,10 @@ const GENERIC_TYPED_IMAGE_LABEL_RE =
   /^(?:room overview|overview|detail(?: view)?|close[- ]?up(?: check)?)(?:\s*\d+)?$/i;
 const GENERIC_SUFFIX_LABEL_RE = /\b(?:view|angle|area|shot|photo|image|picture|frame|spot)\s+\d+$/i;
 
+/** Patterns for inferring image classification from label text when Claude omits classifications */
+const INFER_CLOSEUP_PATTERNS = /close[- ]?up|detail|interior|inside|under|behind|beneath/i;
+const INFER_OVERVIEW_PATTERNS = /overview|wide|full|entire|main|entry|general/i;
+
 function normalizeInspectionLabel(
   rawLabel: string | null | undefined,
   fallbackRoomName: string,
@@ -718,8 +722,8 @@ export async function POST(
       if (Object.keys(roomImageClassifications).length === 0 && insertedBaselinesByUrl.length > 1) {
         console.log(`[train] No image_classifications from AI for "${roomName}" — inferring from labels`);
         // Find the overview (widest/most general shot) and mark close-ups as detail
-        const CLOSEUP_PATTERNS = /close[- ]?up|detail|interior|inside|under|behind|beneath/i;
-        const OVERVIEW_PATTERNS = /overview|wide|full|entire|main|entry|general/i;
+        const CLOSEUP_PATTERNS = INFER_CLOSEUP_PATTERNS;
+        const OVERVIEW_PATTERNS = INFER_OVERVIEW_PATTERNS;
         let overviewUrl: string | null = null;
 
         for (const { imageUrl } of insertedBaselinesByUrl) {
@@ -811,6 +815,25 @@ export async function POST(
             });
           }
           baselineCount++;
+        }
+
+        // Infer classifications for fallback baselines too (same logic as main path)
+        if (Object.keys(roomImageClassifications).length === 0 && insertedFallbackBaselines.length > 1) {
+          console.log(`[train] No classifications for fallback baselines in "${roomName}" — inferring from labels`);
+          const CLOSEUP_PATTERNS = /close[- ]?up|detail|interior|inside|under|behind|beneath/i;
+          const OVERVIEW_PATTERNS = /overview|wide|full|entire|main|entry|general/i;
+          let fbOverviewUrl: string | null = null;
+          for (const { imageUrl } of insertedFallbackBaselines) {
+            const label = roomImageLabels[imageUrl] || "";
+            if (OVERVIEW_PATTERNS.test(label)) { fbOverviewUrl = imageUrl; break; }
+          }
+          if (!fbOverviewUrl) fbOverviewUrl = insertedFallbackBaselines[0]?.imageUrl || null;
+          for (const { imageUrl } of insertedFallbackBaselines) {
+            const label = roomImageLabels[imageUrl] || "";
+            if (CLOSEUP_PATTERNS.test(label) && imageUrl !== fbOverviewUrl) {
+              roomImageClassifications[imageUrl] = { type: "detail", parent_url: fbOverviewUrl, detail_subject: label };
+            }
+          }
         }
 
         if (
