@@ -383,7 +383,13 @@ export default function InspectionCameraScreen() {
     // like "Coverage complete — keep scanning for detail" or "Capture failed. Try again."
     const currentRoom = sessionRef.current?.getState().currentRoomId;
     const roomCov = currentRoom ? roomDetectorRef.current?.getRoomCoverage(currentRoom) : null;
-    if (roomCov && roomCov.percentage >= 80) {
+    // Also check session-level coverage as backup (detector may not have updated yet)
+    const sessionVisit = currentRoom ? sessionRef.current?.getState().visitedRooms.get(currentRoom) : null;
+    const sessionScanned = sessionVisit?.anglesScanned.size ?? 0;
+    const sessionTotal = sessionVisit && currentRoom ? (roomDetectorRef.current?.getRoomProgress(currentRoom)?.total ?? 1) : 1;
+    const sessionPct = sessionTotal > 0 ? (sessionScanned / sessionTotal) * 100 : 0;
+    const effectiveCoverage = Math.max(roomCov?.percentage ?? 0, sessionPct);
+    if (effectiveCoverage >= 80) {
       const lower = message.toLowerCase().trim();
       if (
         lower === "adjusting — keep scanning" ||
@@ -790,7 +796,23 @@ export default function InspectionCameraScreen() {
               status: "suggested",
             },
           ]);
-          void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        }
+        // Prominent finding notification — use double haptic + visible hint
+        // so the user knows the AI found something even while focused on the camera
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        const count = result.findings.length;
+        const firstDesc = result.findings[0].description;
+        const truncated = firstDesc.length > 60 ? firstDesc.slice(0, 57) + "..." : firstDesc;
+        showCaptureHint(
+          count === 1
+            ? `⚠️ Issue found: ${truncated}`
+            : `⚠️ ${count} issues found — swipe down to review`,
+        );
+        // Mark affected baselines as having issues (for tri-state dots)
+        if (resolvedBaselineId) {
+          issueBaselinesRef.current.add(resolvedBaselineId);
+          const currentRoomId = session.getState().currentRoomId;
+          if (currentRoomId) updateCoverageUI(session, currentRoomId);
         }
         if (activeImageSource !== "camera") {
           const firstFinding = result.findings[0];
