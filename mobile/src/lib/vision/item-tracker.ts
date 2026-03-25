@@ -42,7 +42,7 @@ export interface ItemCoverageResult {
 
 const VERIFICATION_THRESHOLD = 0.70; // accumulated confidence to mark verified
 const CONFIDENCE_PER_DETECTION = 0.25; // each YOLO detection adds this much
-const CONFIDENCE_DECAY_RATE = 0.98; // per-frame decay (slight, keeps recent frames relevant)
+const CONFIDENCE_DECAY_RATE = 0.995; // per-frame decay (very gentle — takes ~140 frames to halve)
 const MAX_CONFIDENCE = 1.0;
 
 /**
@@ -53,7 +53,7 @@ const COCO_TO_PROPERTY_MAP: Record<string, string[]> = {
   "chair": ["chair", "recliner", "armchair", "reading chair", "dining chair", "office chair"],
   "couch": ["sofa", "couch", "loveseat", "sectional"],
   "bed": ["bed", "mattress", "bunk"],
-  "dining table": ["table", "dining table", "desk", "coffee table", "side table", "end table"],
+  "dining table": ["dining table", "kitchen table", "table"],
   "tv": ["tv", "television", "monitor", "screen", "display"],
   "laptop": ["laptop", "computer", "macbook"],
   "refrigerator": ["refrigerator", "fridge"],

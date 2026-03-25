@@ -115,11 +115,11 @@ export async function loadYoloModel(): Promise<YoloModelLoader> {
     const startTime = Date.now();
 
     try {
-      // Resize to 640x640
+      // Resize to 640x640 — use max quality to avoid lossy recompression artifacts
       const resized = await ImageManipulator.manipulateAsync(
         imageUri,
         [{ resize: { width: YOLO_INPUT_SIZE, height: YOLO_INPUT_SIZE } }],
-        { format: ImageManipulator.SaveFormat.JPEG, base64: true, compress: 0.8 },
+        { format: ImageManipulator.SaveFormat.JPEG, base64: true, compress: 1.0 },
       );
 
       if (!resized.base64) return null;
@@ -146,15 +146,36 @@ export async function loadYoloModel(): Promise<YoloModelLoader> {
       };
 
       // Run inference
-      const results = await session.run(feeds);
+      let results: Record<string, { data: Float32Array | Int32Array; dims?: readonly number[] }>;
+      try {
+        results = await session.run(feeds);
+      } finally {
+        // Clean up input tensor to prevent memory leaks
+        try { (inputTensor as unknown as { dispose?: () => void }).dispose?.(); } catch { /* noop */ }
+      }
       const outputName = session.outputNames[0] || "output0";
       const output = results[outputName];
       if (!output?.data) return null;
 
-      // Parse YOLOv8 output: shape [1, 84, 8400] (84 = 4 bbox + 80 classes)
-      const data = output.data as Float32Array;
-      const numDetections = 8400;
+      // Validate and parse YOLOv8 output shape
+      // Expected: [1, 84, N] where N = num detections (8400 for 640x640)
+      const dims = (output as unknown as { dims?: readonly number[] }).dims;
       const numClasses = 80;
+      const expectedChannels = 4 + numClasses; // 4 bbox + 80 classes = 84
+      let numDetections: number;
+
+      if (dims && dims.length === 3 && dims[1] === expectedChannels) {
+        numDetections = dims[2];
+      } else if (dims && dims.length === 3 && dims[2] === expectedChannels) {
+        // Transposed output: [1, N, 84] — some ONNX exports use this layout
+        console.warn("[YOLO] Output is transposed [1, N, 84] — adjusting parser");
+        numDetections = dims[1];
+      } else {
+        console.warn("[YOLO] Unexpected output shape:", dims, "— falling back to 8400");
+        numDetections = 8400;
+      }
+
+      const data = output.data as Float32Array;
 
       const detections: DetectedObject[] = [];
 
@@ -191,6 +212,13 @@ export async function loadYoloModel(): Promise<YoloModelLoader> {
         });
       }
 
+      // Clean up output tensors to prevent memory leaks
+      try {
+        for (const key of Object.keys(results)) {
+          (results[key] as unknown as { dispose?: () => void }).dispose?.();
+        }
+      } catch { /* noop — dispose may not be available */ }
+
       // Simple NMS (non-max suppression)
       const nmsDetections = applyNMS(detections, YOLO_NMS_IOU_THRESHOLD);
 
@@ -213,7 +241,7 @@ export async function loadYoloModel(): Promise<YoloModelLoader> {
     isLoaded: true,
     detect,
     dispose: () => {
-      // session?.dispose(); // ONNX RT RN may not support dispose
+      try { (session as unknown as { dispose?: () => void })?.dispose?.(); } catch { /* noop */ }
       session = null;
     },
   };
