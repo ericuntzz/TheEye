@@ -805,11 +805,62 @@ export default function InspectionCameraScreen() {
         result.status === "localized_no_change" ||
         result.status === "localized_changed"
       ) {
-        showCaptureHint(
-          triggerSource === "auto"
-            ? "Saved view captured automatically"
-            : "Saved view captured",
-        );
+        const roomProgress = roomDetectorRef.current?.getRoomProgress(resolvedRoomId);
+        const totalAngles = roomProgress?.total || 0;
+        const scannedCount = roomProgress?.scanned || 0;
+        const displayLabel = resolvedBaseline
+          ? getInspectionDisplayLabel({
+              label: resolvedBaseline.label,
+              roomName: resolvedBaseline.roomName,
+              metadata: resolvedBaseline.metadata,
+            })
+          : null;
+
+        // If this was already credited by the on-device / verified path, avoid
+        // clobbering the more helpful targeted guidance with a generic save hint.
+        if (alreadyCredited || onDeviceAlreadyCredited) {
+          if (totalAngles > 0 && scannedCount >= totalAngles) {
+            showCaptureHint("Room coverage complete ✓");
+          }
+        } else if (totalAngles > 0 && displayLabel) {
+          const isRoomComplete = scannedCount >= totalAngles;
+          const isLastAngle = totalAngles - scannedCount === 1;
+
+          if (isRoomComplete) {
+            showCaptureHint("Room coverage complete ✓");
+          } else if (isLastAngle) {
+            const remainingBaselines =
+              (baselinesRef.current.find((r) => r.roomId === resolvedRoomId)?.baselines || [])
+                .filter(
+                  (b) =>
+                    !onDeviceCreditedRef.current.has(b.id) &&
+                    !roomDetectorRef.current
+                      ?.getCompletionScannedAngles(resolvedRoomId)
+                      .includes(b.id),
+                );
+            const remainingLabel =
+              remainingBaselines.length === 1
+                ? getInspectionDisplayLabel({
+                    label: remainingBaselines[0].label,
+                    roomName: resolvedBaseline?.roomName || resolvedRoomName,
+                    metadata: remainingBaselines[0].metadata,
+                  })
+                : "1 view";
+            showCaptureHint(`${displayLabel} captured — still need: ${remainingLabel}`);
+          } else {
+            showCaptureHint(
+              triggerSource === "auto"
+                ? `${displayLabel} captured automatically (${scannedCount}/${totalAngles})`
+                : `${displayLabel} captured (${scannedCount}/${totalAngles})`,
+            );
+          }
+        } else {
+          showCaptureHint(
+            triggerSource === "auto"
+              ? "Saved view captured automatically"
+              : "Saved view captured",
+          );
+        }
       }
 
       if (result.readiness_score != null) {
