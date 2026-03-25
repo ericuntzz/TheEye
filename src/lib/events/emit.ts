@@ -56,10 +56,17 @@ export async function emitEvent<T extends EventType>(
     })
     .returning({ id: events.id });
 
+  const missionControlSourceId =
+    metadata &&
+    typeof metadata.missionControlSourceId === "string" &&
+    metadata.missionControlSourceId.trim()
+      ? metadata.missionControlSourceId.trim()
+      : inserted.id;
+
   // Mirror selected domain events to Mission Control for ops/support awareness.
   void emitMissionControlDomainEvent(eventType, payload, {
     propertyId,
-    sourceId: inserted.id,
+    sourceId: missionControlSourceId,
   });
 
   return inserted.id;
@@ -111,9 +118,15 @@ export async function emitEvents(
     const options = eventList[i];
     const row = inserted[i];
     if (!options || !row) continue;
+    const missionControlSourceId =
+      options.metadata &&
+      typeof options.metadata.missionControlSourceId === "string" &&
+      options.metadata.missionControlSourceId.trim()
+        ? options.metadata.missionControlSourceId.trim()
+        : row.id;
     void emitMissionControlDomainEvent(options.eventType, options.payload, {
       propertyId: options.propertyId,
-      sourceId: row.id,
+      sourceId: missionControlSourceId,
     });
   }
 

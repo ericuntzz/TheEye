@@ -102,6 +102,7 @@ export async function POST(request: NextRequest) {
         action: normalizedAction || undefined,
         device: device?.platform as string,
         appVersion: device?.appVersion as string,
+        missionControlSourceId: ticketId,
       },
     });
 

@@ -526,4 +526,5 @@ export interface EventMetadata {
   inspectionMode?: string;
   source?: string; // "mobile" | "web" | "system"
   action?: string;
+  missionControlSourceId?: string;
 }
