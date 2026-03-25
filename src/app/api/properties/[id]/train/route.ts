@@ -130,6 +130,149 @@ function isWeakInspectionLabel(
   );
 }
 
+/**
+ * Second-pass classification: When Claude's initial response omits image_classifications,
+ * make a focused API call to classify each baseline as overview/detail/standard.
+ * This is critical for the hierarchy system (auto-crediting detail shots from overview matches).
+ */
+async function maybeClassifyBaselines(
+  roomName: string,
+  insertedBaselinesByUrl: Array<{ id: string; imageUrl: string }>,
+): Promise<void> {
+  if (insertedBaselinesByUrl.length < 2) return;
+
+  // Check if any baselines already have classifications
+  const stored = await db
+    .select({ id: baselineImages.id, metadata: baselineImages.metadata, label: baselineImages.label, imageUrl: baselineImages.imageUrl })
+    .from(baselineImages)
+    .where(inArray(baselineImages.id, insertedBaselinesByUrl.map(b => b.id)));
+
+  const hasClassification = stored.some(b => {
+    const m = (b.metadata || {}) as Record<string, unknown>;
+    return m.imageType && m.imageType !== "standard";
+  });
+  if (hasClassification) return; // Already classified
+
+  console.log(`[train] Room "${roomName}": no classifications found — running classification pass`);
+
+  const classifyContent: Array<{ type: string; text?: string; source?: { type: string; media_type: string; data: string } }> = [
+    {
+      type: "text",
+      text: `You are looking at ${stored.length} photos from a room called "${roomName}". Classify each photo:
+
+- "overview": shows a wide/full view of the room or a large section
+- "detail": a close-up of a specific item that IS visible in an overview shot (auto-covered when overview is matched)
+- "standard": a normal room angle, neither wide overview nor tight close-up
+
+For "detail" photos, identify which overview photo contains the subject and name the subject.
+
+Return ONLY valid JSON:
+{
+  "classifications": {
+    "image_url": {
+      "type": "overview | detail | standard",
+      "parent_url": "url of the overview containing this subject, or null",
+      "detail_subject": "what the close-up shows, or null"
+    }
+  }
+}`,
+    },
+  ];
+
+  for (const baseline of stored) {
+    try {
+      const asset = await fetchImageAsset(baseline.imageUrl);
+      if (asset) {
+        classifyContent.push({
+          type: "text",
+          text: `Photo "${baseline.label}" (${baseline.imageUrl}):`,
+        });
+        classifyContent.push({
+          type: "image",
+          source: {
+            type: "base64",
+            media_type: asset.contentType.split(";")[0].trim(),
+            data: asset.buffer.toString("base64"),
+          },
+        });
+      }
+    } catch { /* skip failed fetches */ }
+  }
+
+  if (classifyContent.length < 3) return; // Need at least 1 image
+
+  const anthropicKey = process.env.CLAUDE_API_KEY;
+  if (!anthropicKey) return;
+
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      signal: AbortSignal.timeout(60000),
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": anthropicKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 2048,
+        messages: [{ role: "user", content: classifyContent }],
+      }),
+    });
+
+    if (!res.ok) return;
+    const data = await res.json();
+    const rawText = data.content?.[0]?.text;
+    if (!rawText) return;
+
+    let parsed: { classifications?: Record<string, { type?: string; parent_url?: string | null; detail_subject?: string | null }> };
+    try {
+      parsed = JSON.parse(rawText);
+    } catch {
+      const start = rawText.indexOf("{");
+      const end = rawText.lastIndexOf("}") + 1;
+      if (start === -1 || end <= start) return;
+      parsed = JSON.parse(rawText.substring(start, end));
+    }
+
+    const classifications = parsed?.classifications || {};
+    let updated = 0;
+
+    for (const baseline of stored) {
+      const cls = classifications[baseline.imageUrl];
+      if (!cls?.type) continue;
+
+      const imageType = (["overview", "detail", "required_detail", "standard"] as const).includes(
+        cls.type as "overview" | "detail" | "required_detail" | "standard",
+      ) ? (cls.type as "overview" | "detail" | "required_detail" | "standard") : "standard";
+
+      if (imageType === "standard") continue; // Only store meaningful classifications
+
+      let parentBaselineId: string | null = null;
+      if (cls.parent_url && typeof cls.parent_url === "string") {
+        const parent = stored.find(b => b.imageUrl === cls.parent_url);
+        parentBaselineId = parent?.id ?? null;
+      }
+
+      await db.update(baselineImages)
+        .set({
+          metadata: {
+            ...((baseline.metadata || {}) as Record<string, unknown>),
+            imageType,
+            parentBaselineId,
+            detailSubject: cls.detail_subject || null,
+          },
+        })
+        .where(eq(baselineImages.id, baseline.id));
+      updated++;
+    }
+
+    console.log(`[train] Classification pass: updated ${updated}/${stored.length} baselines for "${roomName}"`);
+  } catch (err) {
+    console.warn("[train] Classification pass failed (non-fatal):", err);
+  }
+}
+
 async function maybeRefineRoomLabels(
   roomName: string,
   insertedBaselinesByUrl: Array<{ id: string; imageUrl: string }>,
@@ -892,6 +1035,12 @@ export async function POST(
         await maybeRefineRoomLabels(roomName, insertedBaselinesByUrl);
       } catch (err) {
         console.warn("[train] Label refinement pass failed (non-fatal):", err);
+      }
+
+      try {
+        await maybeClassifyBaselines(roomName, insertedBaselinesByUrl);
+      } catch (err) {
+        console.warn("[train] Classification pass failed (non-fatal):", err);
       }
 
       createdRooms.push({
