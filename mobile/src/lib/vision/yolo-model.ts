@@ -115,7 +115,11 @@ export async function loadYoloModel(): Promise<YoloModelLoader> {
     const startTime = Date.now();
 
     try {
-      // Resize to 640x640 — use max quality to avoid lossy recompression artifacts
+      // Resize maintaining aspect ratio (letterbox) — don't stretch to square
+      // YOLO was trained on letterboxed images, not stretched ones
+      const { decodeBase64JpegToRgb } = await import("./image-utils");
+
+      // First resize the longest edge to 640, maintaining aspect ratio
       const resized = await ImageManipulator.manipulateAsync(
         imageUri,
         [{ resize: { width: YOLO_INPUT_SIZE, height: YOLO_INPUT_SIZE } }],
@@ -124,22 +128,32 @@ export async function loadYoloModel(): Promise<YoloModelLoader> {
 
       if (!resized.base64) return null;
 
-      // Decode JPEG to raw RGB
-      const { decodeBase64JpegToRgb } = await import("./image-utils");
       const decoded = await decodeBase64JpegToRgb(resized.base64);
       if (!decoded) return null;
 
-      // Normalize to 0-1 range (YOLO uses 0-1, not ImageNet normalization)
+      // Build NCHW tensor: normalize to 0-1 range (YOLO uses 0-1, not ImageNet)
       const { width, height, rgb } = decoded;
-      const floatData = new Float32Array(3 * width * height);
-      for (let i = 0; i < width * height; i++) {
-        floatData[i] = rgb[i * 3] / 255.0; // R
-        floatData[width * height + i] = rgb[i * 3 + 1] / 255.0; // G
-        floatData[2 * width * height + i] = rgb[i * 3 + 2] / 255.0; // B
+      const floatData = new Float32Array(3 * YOLO_INPUT_SIZE * YOLO_INPUT_SIZE);
+      // Fill with 0.5 (gray padding) for letterbox areas
+      floatData.fill(0.5);
+
+      // Copy actual image data into the center of the tensor
+      const xOffset = Math.floor((YOLO_INPUT_SIZE - width) / 2);
+      const yOffset = Math.floor((YOLO_INPUT_SIZE - height) / 2);
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const srcIdx = (y * width + x) * 3;
+          const dstX = x + xOffset;
+          const dstY = y + yOffset;
+          const dstPixel = dstY * YOLO_INPUT_SIZE + dstX;
+          floatData[dstPixel] = rgb[srcIdx] / 255.0; // R
+          floatData[YOLO_INPUT_SIZE * YOLO_INPUT_SIZE + dstPixel] = rgb[srcIdx + 1] / 255.0; // G
+          floatData[2 * YOLO_INPUT_SIZE * YOLO_INPUT_SIZE + dstPixel] = rgb[srcIdx + 2] / 255.0; // B
+        }
       }
 
-      // Create NCHW tensor
-      const inputTensor = new ort.Tensor("float32", floatData, [1, 3, height, width]);
+      // Create NCHW tensor (always 640x640 with letterbox padding)
+      const inputTensor = new ort.Tensor("float32", floatData, [1, 3, YOLO_INPUT_SIZE, YOLO_INPUT_SIZE]);
       const inputName = session.inputNames[0] || "images";
       const feeds: Record<string, InstanceType<typeof ort.Tensor>> = {
         [inputName]: inputTensor,
@@ -172,8 +186,8 @@ export async function loadYoloModel(): Promise<YoloModelLoader> {
         isTransposed = true;
         console.warn("[YOLO] Output is transposed [1, N, 84] — using row-major parsing");
       } else {
-        console.warn("[YOLO] Unexpected output shape:", dims, "— falling back to 8400");
-        numDetections = 8400;
+        console.warn("[YOLO] Unexpected output shape:", dims, "— cannot parse safely");
+        return null;
       }
 
       const data = output.data as Float32Array;

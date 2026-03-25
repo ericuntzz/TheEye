@@ -36,6 +36,7 @@ export const COCO_TO_INVENTORY_CLASS: Record<string, InventoryClass> = {
   "sink": "fixed_structural",
   "toilet": "fixed_structural",
   "tv": "fixed_structural",
+  "toaster": "fixed_structural",
   // Durable movable — tolerance for repositioning
   "chair": "durable_movable",
   "couch": "durable_movable",
@@ -107,6 +108,11 @@ const COCO_TO_PROPERTY_MAP: Record<string, string[]> = {
   "remote": ["remote", "remote control"],
   "toothbrush": ["toothbrush"],
   "hair drier": ["hair dryer", "blow dryer"],
+  "cell phone": ["phone", "cell phone", "iphone", "smartphone", "mobile"],
+  "keyboard": ["keyboard"],
+  "teddy bear": ["teddy bear", "stuffed animal", "plush"],
+  "wine glass": ["wine glass", "champagne glass", "stemware", "goblet"],
+  "toaster": ["toaster"],
 };
 
 /** Event callback for integration with event-driven architecture */
@@ -197,19 +203,23 @@ export class ItemTracker {
           conf.verified = true;
           gainedConfidence.push(item.id);
 
-          // Emit event for event-driven architecture
-          this.onEvent?.({
-            eventType: "item_verified",
-            roomId,
-            itemId: item.id,
-            itemName: item.name,
-            inventoryClass: item.inventoryClass,
-            metadata: {
-              confidence: conf.confidence,
-              framesSeen: conf.framesSeen,
-              bestConfidence: conf.bestConfidence,
-            },
-          });
+          // Emit event for event-driven architecture (try/catch to not crash detection loop)
+          try {
+            this.onEvent?.({
+              eventType: "item_verified",
+              roomId,
+              itemId: item.id,
+              itemName: item.name,
+              inventoryClass: item.inventoryClass,
+              metadata: {
+                confidence: conf.confidence,
+                framesSeen: conf.framesSeen,
+                bestConfidence: conf.bestConfidence,
+              },
+            });
+          } catch (eventErr) {
+            console.warn("[ItemTracker] Event callback error:", eventErr);
+          }
         }
       }
     }
