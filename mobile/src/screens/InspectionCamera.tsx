@@ -676,10 +676,9 @@ export default function InspectionCameraScreen() {
       // Transition waypoint state: analyzing → captured or issue_found
       if (resolvedBaselineId) {
         analyzingBaselinesRef.current.delete(resolvedBaselineId);
-        if (result.findings && result.findings.length > 0) {
-          issueBaselinesRef.current.add(resolvedBaselineId);
-        }
-        // Refresh waypoint dots to reflect the state transition
+        // Note: issueBaselinesRef is set AFTER the suppression filter below,
+        // not here, to avoid amber dots for fully-suppressed findings.
+        // Refresh waypoint dots to reflect analyzing → captured transition
         updateCoverageUI(session, resolvedRoomId);
       }
 
@@ -2155,6 +2154,7 @@ export default function InspectionCameraScreen() {
     const now = Date.now();
     for (const [id, entry] of pendingAnalysesRef.current) {
       if (now - entry.startedAt > 90_000) {
+        analyzingBaselinesRef.current.delete(entry.baselineId);
         pendingAnalysesRef.current.delete(id);
         verifiedComparisonIdsRef.current.delete(id);
         console.warn(`[InspectionCamera] Stale pending analysis ${id} cleaned up after 90s`);
@@ -2181,6 +2181,7 @@ export default function InspectionCameraScreen() {
         });
         pendingAnalysesRef.current.clear();
         verifiedComparisonIdsRef.current.clear();
+        analyzingBaselinesRef.current.clear();
       }
     }
 
