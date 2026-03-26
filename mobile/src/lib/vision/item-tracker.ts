@@ -126,7 +126,8 @@ export type ItemEventCallback = (event: {
   metadata?: Record<string, unknown>;
 }) => void;
 
-export type CompletionTier = "not_started" | "minimum" | "standard" | "thorough";
+export type ItemCompletionTier = "not_started" | "minimum" | "standard" | "thorough";
+export type CompletionTier = ItemCompletionTier;
 
 export class ItemTracker {
   private expectedItems: Map<string, ExpectedItem[]> = new Map();
@@ -303,7 +304,7 @@ export class ItemTracker {
    * standard: 60%+ items verified
    * thorough: 100% items verified
    */
-  getCompletionTier(roomId: string): CompletionTier {
+  getCompletionTier(roomId: string): ItemCompletionTier {
     const coverage = this.getRoomCoverage(roomId);
     if (coverage.total === 0) return "minimum";
     if (coverage.percentage >= 100) return "thorough";
@@ -332,7 +333,7 @@ export class ItemTracker {
       confidence: number;
       framesSeen: number;
     }>;
-    tier: CompletionTier;
+    tier: ItemCompletionTier;
     percentage: number;
   }> {
     const result: ReturnType<ItemTracker["serializeState"]> = [];

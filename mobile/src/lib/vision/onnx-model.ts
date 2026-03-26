@@ -9,6 +9,7 @@
  */
 
 import { decodeBase64JpegToRgb } from "./image-utils";
+import { getInspectionAiBuildRequirement } from "../runtime/capabilities";
 
 const EMBEDDING_DIM = 512;
 const IMAGE_SIZE = 256; // MobileCLIP-S0 input size
@@ -52,7 +53,7 @@ export async function loadOnnxModel(): Promise<OnnxModelLoader> {
     if (!modelAsset.localUri) {
       console.warn("[onnx-model] Model asset has no local URI");
       return createStubLoader(
-        "AI inspection requires the Atria dev build. Open the dev build instead of Expo Go.",
+        getInspectionAiBuildRequirement(),
       );
     }
 
@@ -138,7 +139,7 @@ export async function loadOnnxModel(): Promise<OnnxModelLoader> {
     );
     return createStubLoader(
       /native module|expo go|onnxruntime|cannot find module/i.test(message)
-        ? "AI inspection requires the Atria dev build. Expo Go cannot run the on-device vision model."
+        ? getInspectionAiBuildRequirement()
         : "AI inspection is unavailable in this app runtime. Open the latest Atria dev build and try again.",
     );
   }

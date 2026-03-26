@@ -13,7 +13,7 @@
  * 5. Results screen showing detected rooms and items
  */
 
-import React, { useState, useRef, useCallback, useEffect } from "react";
+import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import {
   View,
   Text,
@@ -49,6 +49,7 @@ import {
 } from "../lib/api";
 import { colors } from "../lib/tokens";
 import * as FileSystem from "expo-file-system";
+import { buildCapabilities, getVideoTrainingCapability } from "../lib/runtime/capabilities";
 
 type Nav = NativeStackNavigationProp<RootStackParamList, "PropertyTraining">;
 type TrainingRoute = RouteProp<RootStackParamList, "PropertyTraining">;
@@ -136,7 +137,6 @@ type NativeVideoThumbnailsModule = {
 
 let cachedVideoThumbnailsModule: VideoThumbnailsModule | null | undefined;
 let loggedMissingVideoThumbnailsModule = false;
-const hasExpoAvNativeModule = Boolean(requireOptionalNativeModule("ExponentAV"));
 
 function getVideoThumbnailsModule(): VideoThumbnailsModule | null {
   if (cachedVideoThumbnailsModule !== undefined) {
@@ -154,7 +154,7 @@ function getVideoThumbnailsModule(): VideoThumbnailsModule | null {
       );
     }
     console.warn(
-      "[PropertyTraining] Video capture will upload the original video, but training still needs at least one photo unless the dev client is rebuilt.",
+      "[PropertyTraining] Video training is unavailable in this client build. Use photo capture or install the latest Atria dev build.",
     );
     cachedVideoThumbnailsModule = null;
     return null;
@@ -201,7 +201,19 @@ export default function PropertyTrainingScreen() {
   const cancelRequestedRef = useRef(false);
   const runIdRef = useRef(0);
   const trainingAbortRef = useRef<AbortController | null>(null);
+  const videoTrainingCapability = useMemo(() => getVideoTrainingCapability(), []);
   const videoKeyframesAvailable = videoThumbnailsRef.current !== null;
+  const videoTrainingBuildNote = !videoTrainingCapability.optimized
+    ? [videoTrainingCapability.reason, videoTrainingCapability.recoveryHint]
+        .filter(Boolean)
+        .join(" ")
+    : null;
+
+  useEffect(() => {
+    if (!videoTrainingCapability.supported && captureMode === "video" && !isRecording) {
+      setCaptureMode("photo");
+    }
+  }, [captureMode, isRecording, videoTrainingCapability.supported]);
 
   // ── Processing Screen Animations ──
   const breatheAnim = useRef(new Animated.Value(0)).current;
@@ -595,6 +607,16 @@ export default function PropertyTrainingScreen() {
   const handleStartRecording = useCallback(async () => {
     if (!cameraRef.current || isRecordingRef.current) return;
 
+    if (!videoTrainingCapability.supported) {
+      Alert.alert(
+        "Video Training Unavailable",
+        [videoTrainingCapability.reason, videoTrainingCapability.recoveryHint]
+          .filter(Boolean)
+          .join(" "),
+      );
+      return;
+    }
+
     if (!microphonePermission?.granted) {
       const result = await requestMicrophonePermission();
       if (!result.granted) {
@@ -613,11 +635,13 @@ export default function PropertyTrainingScreen() {
       }
     }
 
-    if (!videoThumbnailsRef.current && !videoSupportAlertShownRef.current) {
+    if (!videoTrainingCapability.optimized && !videoSupportAlertShownRef.current) {
       videoSupportAlertShownRef.current = true;
       Alert.alert(
-        "Video Capture Limited",
-        "This app build can record video, but it cannot extract training frames from video yet. Capture at least one photo, or reinstall the latest iOS dev client to enable video keyframes.",
+        "Video Training Reduced",
+        [videoTrainingCapability.reason, videoTrainingCapability.recoveryHint]
+          .filter(Boolean)
+          .join(" "),
       );
     }
 
@@ -654,7 +678,7 @@ export default function PropertyTrainingScreen() {
       isRecordingRef.current = false;
       setIsRecording(false);
     }
-  }, [extractVideoPreviewUri, microphonePermission, requestMicrophonePermission]);
+  }, [extractVideoPreviewUri, microphonePermission, requestMicrophonePermission, videoTrainingCapability]);
 
   const handleStopRecording = useCallback(() => {
     if (!cameraRef.current || !isRecordingRef.current) return;
@@ -688,7 +712,7 @@ export default function PropertyTrainingScreen() {
 
     // Get video duration for dynamic timestamp generation
     let videoDurationMs: number | undefined;
-    if (hasExpoAvNativeModule) {
+    if (buildCapabilities.hasExpoAvNativeModule) {
       try {
         const { Audio } = await import("expo-av");
         const { sound } = await Audio.Sound.createAsync({ uri: videoUri });
@@ -731,10 +755,14 @@ export default function PropertyTrainingScreen() {
             sharpness = laplacianVariance(gray, decoded.width, decoded.height);
           }
         } catch {
-          // Fallback: use file size as a rough proxy
+          // Decode failed — score as 0 (unknown sharpness).
+          // Do NOT use file size as fallback — it's on a different scale
+          // and would rank blurry decode-failed frames above sharp ones.
+          sharpness = 0;
           try {
+            // Still log for debugging
             const info = await FileSystem.getInfoAsync(thumb.uri);
-            sharpness = (info.exists && "size" in info) ? (info.size ?? 0) : 0;
+            void info; // suppress unused
           } catch { /* sharpness stays 0 */ }
         }
 
@@ -1004,10 +1032,12 @@ export default function PropertyTrainingScreen() {
       return;
     }
 
-    if (!videoThumbnailsRef.current && captures.every((capture) => capture.type === "video")) {
+    if (!videoTrainingCapability.supported && captures.every((capture) => capture.type === "video")) {
       Alert.alert(
         "Photos Still Required",
-        "This app build cannot turn videos into training frames yet. Capture at least one photo, or reinstall the latest iOS dev client before training.",
+        [videoTrainingCapability.reason, "Capture at least one photo before training.", videoTrainingCapability.recoveryHint]
+          .filter(Boolean)
+          .join(" "),
       );
       return;
     }
@@ -1016,7 +1046,11 @@ export default function PropertyTrainingScreen() {
     if (!hasUsableFrames) {
       Alert.alert(
         "No Training Frames Available",
-        "These videos did not produce usable training frames. Capture at least one photo, or reinstall the latest iOS dev client before training.",
+        videoTrainingCapability.supported
+          ? "These videos did not produce usable training frames. Capture at least one photo or record a steadier video clip before training."
+          : [videoTrainingCapability.reason, "Capture at least one photo before training.", videoTrainingCapability.recoveryHint]
+              .filter(Boolean)
+              .join(" "),
       );
       return;
     }
@@ -1029,7 +1063,7 @@ export default function PropertyTrainingScreen() {
         { text: isAddMore ? "Re-train" : "Train", style: "default", onPress: handleUploadAndTrain },
       ],
     );
-  }, [captures, hasUsableVideoTrainingFrames, isAddMore, handleUploadAndTrain]);
+  }, [captures, hasUsableVideoTrainingFrames, isAddMore, handleUploadAndTrain, videoTrainingCapability]);
 
   // ──── Intro Phase ────
   if (phase === "intro") {
@@ -1097,6 +1131,15 @@ export default function PropertyTrainingScreen() {
               {"\u2022"} More images = more accurate inspections
             </Text>
           </View>
+
+          {videoTrainingBuildNote && (
+            <View style={styles.buildCapabilityCard}>
+              <Text style={styles.buildCapabilityTitle}>
+                {videoTrainingCapability.supported ? "Video Training In This Build" : "Photo-Only Training In This Build"}
+              </Text>
+              <Text style={styles.buildCapabilityText}>{videoTrainingBuildNote}</Text>
+            </View>
+          )}
 
           <TouchableOpacity
             style={styles.startButton}
@@ -1497,11 +1540,9 @@ export default function PropertyTrainingScreen() {
         </View>
       )}
 
-      {!videoKeyframesAvailable && captureMode === "video" && !isRecording && (
+      {captureMode === "video" && !isRecording && videoTrainingBuildNote && (
         <View style={styles.infoBanner}>
-          <Text style={styles.infoText}>
-            Video is available, but this build cannot extract training frames from it yet. Add at least one photo or reinstall the latest iOS dev client.
-          </Text>
+          <Text style={styles.infoText}>{videoTrainingBuildNote}</Text>
         </View>
       )}
 
@@ -1657,9 +1698,21 @@ export default function PropertyTrainingScreen() {
 
           {/* Mode toggle (Photo / Video) */}
           <TouchableOpacity
-            style={styles.modeToggle}
+            style={[
+              styles.modeToggle,
+              !videoTrainingCapability.supported && captureMode === "photo" && styles.modeToggleDisabled,
+            ]}
             onPress={() => {
               if (isRecording) return;
+              if (!videoTrainingCapability.supported && captureMode === "photo") {
+                Alert.alert(
+                  "Video Training Unavailable",
+                  [videoTrainingCapability.reason, videoTrainingCapability.recoveryHint]
+                    .filter(Boolean)
+                    .join(" "),
+                );
+                return;
+              }
               setCaptureMode((m) => (m === "photo" ? "video" : "photo"));
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
             }}
@@ -1857,6 +1910,27 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: 14,
     lineHeight: 24,
+  },
+  buildCapabilityCard: {
+    backgroundColor: "rgba(245, 158, 11, 0.08)",
+    borderRadius: 16,
+    padding: 18,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: "rgba(245, 158, 11, 0.18)",
+  },
+  buildCapabilityTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: colors.heading,
+    marginBottom: 6,
+    letterSpacing: 0.2,
+    textTransform: "uppercase",
+  },
+  buildCapabilityText: {
+    color: colors.muted,
+    fontSize: 14,
+    lineHeight: 20,
   },
   startButton: {
     backgroundColor: colors.primary,
@@ -2526,6 +2600,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.08)",
+  },
+  modeToggleDisabled: {
+    opacity: 0.55,
   },
   modeToggleText: {
     color: "#fff",

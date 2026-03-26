@@ -9,7 +9,7 @@
  * Server-side transcription via Whisper or Claude.
  */
 
-import { requireOptionalNativeModule } from "expo-modules-core";
+import { getVoiceNotesCapability } from "../runtime/capabilities";
 
 export interface VoiceNoteResult {
   /** Transcribed text from the recording */
@@ -34,7 +34,6 @@ export interface VoiceNoteRecorder {
 }
 
 const MAX_RECORDING_DURATION_MS = 30000; // 30 seconds max
-const hasExpoAvNativeModule = Boolean(requireOptionalNativeModule("ExponentAV"));
 type ExpoAudioModule = typeof import("expo-av").Audio;
 type RecordingHandle = {
   stopAndUnloadAsync: () => Promise<unknown>;
@@ -42,7 +41,7 @@ type RecordingHandle = {
 };
 
 async function loadAudioModule(): Promise<ExpoAudioModule | null> {
-  if (!hasExpoAvNativeModule) {
+  if (!getVoiceNotesCapability().supported) {
     return null;
   }
   try {
@@ -74,7 +73,10 @@ export function createVoiceNoteRecorder(
     try {
       audioModule = await loadAudioModule();
       if (!audioModule) {
-        console.warn("[VoiceNotes] Recording unavailable: expo-av native module missing");
+        console.warn(
+          "[VoiceNotes] Recording unavailable:",
+          getVoiceNotesCapability().reason || "Unsupported build",
+        );
         return false;
       }
 
