@@ -686,7 +686,7 @@ export default function PropertyTrainingScreen() {
     }
 
     // Phase 1: Extract ALL candidate frames at each timestamp
-    const candidates: Array<{ uri: string; time: number; fileSize: number }> = [];
+    const candidates: Array<{ uri: string; time: number; sharpness: number }> = [];
     const seen = new Set<string>();
 
     const timestamps = generateKeyframeTimestamps();
@@ -699,15 +699,29 @@ export default function PropertyTrainingScreen() {
         if (!thumb?.uri || seen.has(thumb.uri)) continue;
         seen.add(thumb.uri);
 
-        // Use file size as sharpness proxy: sharper images have more
-        // high-frequency detail and compress to larger files at same quality.
-        let fileSize = 0;
+        // Compute real sharpness via Laplacian variance on a downsized grayscale frame.
+        // Falls back to file size if decode fails.
+        let sharpness = 0;
         try {
-          const info = await FileSystem.getInfoAsync(thumb.uri);
-          fileSize = (info.exists && "size" in info) ? (info.size ?? 0) : 0;
-        } catch { /* fallback to 0 */ }
+          const base64Content = await FileSystem.readAsStringAsync(thumb.uri, {
+            encoding: "base64" as const,
+          });
+          const { decodeBase64JpegToRgb, rgbToGrayscale, laplacianVariance } =
+            await import("../lib/vision/image-utils");
+          const decoded = await decodeBase64JpegToRgb(base64Content);
+          if (decoded) {
+            const gray = rgbToGrayscale(decoded.rgb, decoded.width, decoded.height);
+            sharpness = laplacianVariance(gray, decoded.width, decoded.height);
+          }
+        } catch {
+          // Fallback: use file size as a rough proxy
+          try {
+            const info = await FileSystem.getInfoAsync(thumb.uri);
+            sharpness = (info.exists && "size" in info) ? (info.size ?? 0) : 0;
+          } catch { /* sharpness stays 0 */ }
+        }
 
-        candidates.push({ uri: thumb.uri, time, fileSize });
+        candidates.push({ uri: thumb.uri, time, sharpness });
       } catch {
         // Ignore out-of-range timestamps and continue trying others.
       }
@@ -718,8 +732,8 @@ export default function PropertyTrainingScreen() {
     }
 
     // Phase 2: Score and select the best diverse set.
-    // Sort by sharpness (file size) descending, then pick with temporal spread.
-    candidates.sort((a, b) => b.fileSize - a.fileSize);
+    // Sort by sharpness (Laplacian variance) descending, then pick with temporal spread.
+    candidates.sort((a, b) => b.sharpness - a.sharpness);
 
     // Greedy selection: pick sharpest frames that are at least 1.5s apart
     const MIN_TIME_GAP_MS = 1500;

@@ -1617,13 +1617,21 @@ export default function InspectionCameraScreen() {
               // The user is clearly trying to capture this specific target.
               const bRoomId = locked.baseline.roomId;
               const roomCov = detector.getRoomCoverage(bRoomId);
+              const completionScanned = detector.getCompletionScannedAngles(bRoomId);
               const isFinalAngle =
                 roomIsConfident &&
                 roomCov &&
                 roomCov.total > 0 &&
                 (roomCov.total - roomCov.scanned) === 1 &&
                 !onDeviceCreditedRef.current.has(locked.baseline.id) &&
-                !detector.getCompletionScannedAngles(bRoomId).includes(locked.baseline.id);
+                !completionScanned.includes(locked.baseline.id);
+
+              // Log when final-angle bias is active for telemetry
+              if (isFinalAngle && locked.similarity >= 0.30) {
+                console.log(
+                  `[FinalAngle] Target ${locked.baseline.id} sim=${locked.similarity.toFixed(3)} (threshold=${ON_DEVICE_COVERAGE_THRESHOLD_FINAL_ANGLE})`,
+                );
+              }
 
               const onDeviceThreshold = isFinalAngle
                 ? ON_DEVICE_COVERAGE_THRESHOLD_FINAL_ANGLE

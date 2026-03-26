@@ -72,6 +72,44 @@ export function rgbToGrayscale(
   return grayscale;
 }
 
+/**
+ * Compute Laplacian variance as a sharpness score.
+ * Higher values = sharper image. Works on grayscale pixels.
+ * Uses a 3x3 Laplacian kernel: [[0,1,0],[1,-4,1],[0,1,0]]
+ * This is the standard "variance of Laplacian" blur detection metric.
+ */
+export function laplacianVariance(
+  grayscale: Uint8Array,
+  width: number,
+  height: number,
+): number {
+  if (width < 3 || height < 3) return 0;
+
+  let sum = 0;
+  let sumSq = 0;
+  let count = 0;
+
+  for (let y = 1; y < height - 1; y++) {
+    for (let x = 1; x < width - 1; x++) {
+      const idx = y * width + x;
+      // 3x3 Laplacian: center * -4 + top + bottom + left + right
+      const lap =
+        -4 * grayscale[idx] +
+        grayscale[(y - 1) * width + x] +
+        grayscale[(y + 1) * width + x] +
+        grayscale[y * width + (x - 1)] +
+        grayscale[y * width + (x + 1)];
+      sum += lap;
+      sumSq += lap * lap;
+      count++;
+    }
+  }
+
+  if (count === 0) return 0;
+  const mean = sum / count;
+  return sumSq / count - mean * mean; // variance
+}
+
 function stripDataUriPrefix(base64OrDataUri: string): string {
   const marker = ";base64,";
   const markerIndex = base64OrDataUri.indexOf(marker);
