@@ -3,6 +3,10 @@ import { getDbUser } from "@/lib/auth";
 import { db } from "@/server/db";
 import { properties } from "@/server/schema";
 import { eq } from "drizzle-orm";
+import {
+  normalizePropertyName,
+  normalizePropertyNameForComparison,
+} from "@/lib/properties/name-utils";
 
 // GET /api/properties - List all properties for the current user (paginated)
 export async function GET(request: NextRequest) {
@@ -55,7 +59,7 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
-    const trimmedName = String(body.name).trim();
+    const trimmedName = normalizePropertyName(String(body.name));
     if (trimmedName.length < 2 || trimmedName.length > 120) {
       return NextResponse.json(
         { error: "Property name must be between 2 and 120 characters" },
@@ -71,6 +75,24 @@ export async function POST(request: NextRequest) {
     }
     body.name = trimmedName;
 
+    const normalizedRequestedName = normalizePropertyNameForComparison(trimmedName);
+    const existingProperties = await db
+      .select({ name: properties.name })
+      .from(properties)
+      .where(eq(properties.userId, dbUser.id));
+
+    const duplicateProperty = existingProperties.find(
+      (property) =>
+        normalizePropertyNameForComparison(property.name) === normalizedRequestedName,
+    );
+
+    if (duplicateProperty) {
+      return NextResponse.json(
+        { error: "You already have a property with this name. Choose a different name." },
+        { status: 409 },
+      );
+    }
+
     const parseIntSafe = (val: unknown): number | null => {
       if (val == null || val === "") return null;
       const n = parseInt(String(val), 10);
@@ -81,7 +103,7 @@ export async function POST(request: NextRequest) {
       .insert(properties)
       .values({
         userId: dbUser.id,
-        name: String(body.name).trim(),
+        name: trimmedName,
         address: body.address ? String(body.address) : null,
         city: body.city ? String(body.city) : null,
         state: body.state ? String(body.state) : null,

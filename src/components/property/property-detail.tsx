@@ -21,7 +21,6 @@ import {
   Home,
   Loader2,
   ScanLine,
-  Upload,
   CheckCircle,
   Package,
   AlertCircle,
@@ -29,6 +28,7 @@ import {
   Pencil,
   Trash2,
   ImagePlus,
+  Smartphone,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -42,7 +42,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import Link from "next/link";
-import { TrainingMode } from "./training-mode";
 import { useRouter } from "next/navigation";
 
 interface Property {
@@ -86,7 +85,7 @@ interface BaselineImage {
   label: string | null;
 }
 
-type ViewMode = "overview" | "training";
+type MobileAppPromptIntent = "training" | "inspection";
 
 export function PropertyDetail({
   propertyId,
@@ -100,9 +99,17 @@ export function PropertyDetail({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const searchParams = useSearchParams();
-  const autoTrain = searchParams.get("mode") === "training";
-  const [viewMode, setViewMode] = useState<ViewMode>(autoTrain ? "training" : "overview");
+  const requestedMode = searchParams.get("mode");
+  const [mobileAppPrompt, setMobileAppPrompt] = useState<MobileAppPromptIntent | null>(null);
   const router = useRouter();
+
+  useEffect(() => {
+    if (requestedMode === "training") {
+      setMobileAppPrompt("training");
+    } else if (requestedMode === "inspection") {
+      setMobileAppPrompt("inspection");
+    }
+  }, [requestedMode]);
 
   const fetchProperty = useCallback(async () => {
     try {
@@ -135,31 +142,9 @@ export function PropertyDetail({
     Promise.all([fetchProperty(), fetchRooms()]).then(() => setLoading(false));
   }, [fetchProperty, fetchRooms]);
 
-  const handleTrainingComplete = useCallback(() => {
-    fetchProperty();
-    fetchRooms();
-    setViewMode("overview");
-  }, [fetchProperty, fetchRooms]);
-
-  async function handleStartInspection() {
-    setError(null);
-    try {
-      const res = await fetch("/api/inspections", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ propertyId }),
-        credentials: "include",
-      });
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || "Failed to start inspection");
-      }
-      const inspection = await res.json();
-      router.push(`/inspection/${inspection.id}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to start inspection");
-    }
-  }
+  const openMobileAppPrompt = useCallback((intent: MobileAppPromptIntent) => {
+    setMobileAppPrompt(intent);
+  }, []);
 
   // Edit & Delete state
   const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -255,19 +240,6 @@ export function PropertyDetail({
     );
   }
 
-  if (viewMode === "training") {
-    return (
-      <AppLayout userEmail={user.email || ""} mobileNav={<MobileNav />}>
-        <TrainingMode
-          propertyId={propertyId}
-          propertyName={property.name}
-          onBack={() => setViewMode("overview")}
-          onComplete={handleTrainingComplete}
-        />
-      </AppLayout>
-    );
-  }
-
   return (
     <AppLayout userEmail={user.email || ""} mobileNav={<MobileNav />}>
       <div className="px-4 pb-6 lg:p-8 max-w-7xl">
@@ -307,20 +279,20 @@ export function PropertyDetail({
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setViewMode("training")}
+              onClick={() => openMobileAppPrompt("training")}
               className="gap-1.5 rounded-xl h-10"
             >
-              <Upload className="h-4 w-4" />
-              {property.trainingStatus === "trained" ? "Retrain" : "Train AI"}
+              <Smartphone className="h-4 w-4" />
+              {property.trainingStatus === "trained" ? "Retrain in iPhone App" : "Train in iPhone App"}
             </Button>
             {property.trainingStatus === "trained" && (
               <Button
                 size="sm"
-                onClick={handleStartInspection}
+                onClick={() => openMobileAppPrompt("inspection")}
                 className="gap-1.5 rounded-xl h-10"
               >
-                <ScanLine className="h-4 w-4" />
-                Inspect
+                <Smartphone className="h-4 w-4" />
+                Inspect in iPhone App
               </Button>
             )}
           </div>
@@ -368,16 +340,16 @@ export function PropertyDetail({
               </Button>
               <Button
                 variant="outline"
-                onClick={() => setViewMode("training")}
+                onClick={() => openMobileAppPrompt("training")}
                 className="gap-2"
               >
-                <Upload className="h-4 w-4" />
-                {property.trainingStatus === "trained" ? "Retrain" : "Train AI"}
+                <Smartphone className="h-4 w-4" />
+                {property.trainingStatus === "trained" ? "Retrain in iPhone App" : "Train in iPhone App"}
               </Button>
               {property.trainingStatus === "trained" && (
-                <Button onClick={handleStartInspection} className="gap-2">
-                  <ScanLine className="h-4 w-4" />
-                  New Inspection
+                <Button onClick={() => openMobileAppPrompt("inspection")} className="gap-2">
+                  <Smartphone className="h-4 w-4" />
+                  Inspect in iPhone App
                 </Button>
               )}
             </div>
@@ -445,15 +417,15 @@ export function PropertyDetail({
             </div>
             <div className="flex-1">
               <p className="text-sm font-medium text-foreground">
-                Train the AI on this property
+                Train this property in the iPhone app
               </p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Upload photos of each room in its ideal, guest-ready state. The AI learns what &quot;perfect&quot; looks like so it can detect changes during inspections.
+                The web app handles accounts, properties, and history. Baseline capture and walkthrough inspections currently live in the iPhone app.
               </p>
             </div>
-            <Button onClick={() => setViewMode("training")} size="sm" className="gap-2 shrink-0 rounded-xl">
-              <Upload className="h-4 w-4" />
-              Start Training
+            <Button onClick={() => openMobileAppPrompt("training")} size="sm" className="gap-2 shrink-0 rounded-xl">
+              <Smartphone className="h-4 w-4" />
+              Open iPhone App
             </Button>
           </div>
         )}
@@ -596,6 +568,38 @@ export function PropertyDetail({
             <Button variant="destructive" onClick={handleDelete} disabled={deleteLoading} className="gap-1.5">
               <Trash2 className="h-4 w-4" />
               {deleteLoading ? "Deleting..." : "Delete Property"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={mobileAppPrompt !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setMobileAppPrompt(null);
+          }
+        }}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>
+              {mobileAppPrompt === "inspection"
+                ? "Use the iPhone app for inspections"
+                : "Use the iPhone app for training"}
+            </DialogTitle>
+            <DialogDescription>
+              {mobileAppPrompt === "inspection"
+                ? "Walkthrough inspections, live camera guidance, and AI capture all happen in the iPhone app. The web app is currently for account setup, property management, and history."
+                : "Baseline capture and room training happen in the iPhone app. The web app is currently for account setup, property management, and reviewing results."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-xl border border-border bg-secondary/40 px-4 py-3 text-sm text-muted-foreground">
+            App download and beta distribution are coming soon. For now, plan on using the iPhone app build for training and inspections.
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMobileAppPrompt(null)}>
+              Got it
             </Button>
           </DialogFooter>
         </DialogContent>

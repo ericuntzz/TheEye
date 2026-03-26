@@ -5,6 +5,10 @@ import { properties } from "@/server/schema";
 import { eq, and } from "drizzle-orm";
 import { emitEventSafe } from "@/lib/events/emit";
 import { deleteOwnedPropertyGraph } from "@/lib/properties/delete-property-graph";
+import {
+  normalizePropertyName,
+  normalizePropertyNameForComparison,
+} from "@/lib/properties/name-utils";
 
 // GET /api/properties/[id] - Get a single property
 export async function GET(
@@ -84,7 +88,7 @@ export async function PATCH(
 
     // Validate property name if included
     if (body.name != null) {
-      const name = String(body.name).trim();
+      const name = normalizePropertyName(String(body.name));
       if (!name || name.length < 2 || name.length > 120) {
         return NextResponse.json(
           { error: "Property name must be between 2 and 120 characters" },
@@ -99,6 +103,25 @@ export async function PATCH(
         );
       }
       body.name = name;
+
+      const normalizedRequestedName = normalizePropertyNameForComparison(name);
+      const existingProperties = await db
+        .select({ id: properties.id, name: properties.name })
+        .from(properties)
+        .where(eq(properties.userId, dbUser.id));
+
+      const duplicateProperty = existingProperties.find(
+        (property) =>
+          property.id !== id &&
+          normalizePropertyNameForComparison(property.name) === normalizedRequestedName,
+      );
+
+      if (duplicateProperty) {
+        return NextResponse.json(
+          { error: "You already have a property with this name. Choose a different name." },
+          { status: 409 },
+        );
+      }
     }
 
     // Only allow whitelisted fields

@@ -113,7 +113,7 @@ export function AddPropertyDialog({
       const property = await res.json();
       onOpenChange(false);
       onSuccess();
-      router.push(`/property/${property.id}?mode=training`);
+      router.push(`/property/${property.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
@@ -127,7 +127,7 @@ export function AddPropertyDialog({
         <DialogHeader>
           <DialogTitle>New Property</DialogTitle>
           <DialogDescription>
-            Name your property, then upload photos to train the AI.
+            Create the property here, then use the iPhone app for training and inspections.
           </DialogDescription>
         </DialogHeader>
         <form ref={formRef} onSubmit={handleSubmit} className="space-y-4">
