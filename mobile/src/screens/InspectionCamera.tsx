@@ -57,7 +57,7 @@ import {
 import { getInspectionDisplayLabel } from "../lib/inspection/display-labels";
 import type { ImageSourceType } from "../lib/image-source/types";
 import { InspectionAnnouncer } from "../lib/audio/inspection-announcer";
-import { BatchAnalyzer, type BatchFrame } from "../lib/vision/batch-analyzer";
+import { BatchAnalyzer } from "../lib/vision/batch-analyzer";
 
 type Nav = NativeStackNavigationProp<RootStackParamList, "InspectionCamera">;
 type CameraRoute = RouteProp<RootStackParamList, "InspectionCamera">;
@@ -2612,8 +2612,8 @@ export default function InspectionCameraScreen() {
     if (!isMountedRef.current) return;
     const session = sessionRef.current;
     const comparison = comparisonRef.current;
-    if (!session || !comparison || !cameraRef.current || paused) return;
-    if (isProcessing) {
+    if (!session || !comparison || !cameraRef.current || pausedRef.current) return;
+    if (isProcessingRef.current) {
       showCaptureHint("AI is still processing the last capture...");
       return;
     }
@@ -2775,8 +2775,6 @@ export default function InspectionCameraScreen() {
   }, [
     captureHighResFrame,
     getBaselineById,
-    paused,
-    isProcessing,
     inspectionMode,
     inspectionId,
     rankCandidatesForCapturedFrame,
