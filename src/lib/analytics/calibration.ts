@@ -129,8 +129,10 @@ export async function generateCalibrationReport(
         .select({
           metadata: inspectionEvents.metadata,
           roomId: inspectionEvents.roomId,
+          propertyId: inspections.propertyId,
         })
         .from(inspectionEvents)
+        .innerJoin(inspections, eq(inspections.id, inspectionEvents.inspectionId))
         .where(
           and(
             inArray(inspectionEvents.inspectionId, userInspectionIds),
@@ -154,7 +156,7 @@ export async function generateCalibrationReport(
         stubbornCounts.set(key, {
           label,
           count: 1,
-          propertyId: "",
+          propertyId: event.propertyId,
           roomId,
         });
       }

@@ -349,7 +349,7 @@ export async function POST(
   try {
     const confirmedFindings = roomResults.flatMap((r) =>
       (r.findings || [])
-        .filter((f) => f.status !== "dismissed")
+        .filter((f) => f.status === "confirmed")
         .map((f) => ({
           id: f.id,
           description: f.description || "",

@@ -61,6 +61,7 @@ import { BatchAnalyzer } from "../lib/vision/batch-analyzer";
 import { createVoiceNoteRecorder, type VoiceNoteRecorder } from "../lib/audio/voice-notes";
 import { loadYoloModel, type YoloModelLoader } from "../lib/vision/yolo-model";
 import { ItemTracker } from "../lib/vision/item-tracker";
+import { getVoiceNotesCapability } from "../lib/runtime/capabilities";
 
 type Nav = NativeStackNavigationProp<RootStackParamList, "InspectionCamera">;
 type CameraRoute = RouteProp<RootStackParamList, "InspectionCamera">;
@@ -228,6 +229,7 @@ export default function InspectionCameraScreen() {
   const yoloModelRef = useRef<YoloModelLoader | null>(null);
   const itemTrackerRef = useRef<ItemTracker | null>(null);
   const yoloTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const yoloLoadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [detectedItems, setDetectedItems] = useState<string[]>([]);
   const [captureHint, setCaptureHint] = useState<string | null>(null);
   const [localizationState, setLocalizationState] = useState<LocalizationState>("not_localized");
@@ -372,6 +374,88 @@ export default function InspectionCameraScreen() {
     }
   }, []);
   const autoDetectReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const voiceNotesAvailable = getVoiceNotesCapability().supported;
+
+  const closeNoteModal = useCallback(() => {
+    if (voiceRecorderRef.current?.isRecording || isRecordingVoice) {
+      setIsRecordingVoice(false);
+      void voiceRecorderRef.current?.cancelRecording();
+    }
+    setNoteText("");
+    setShowNoteModal(false);
+  }, [isRecordingVoice]);
+
+  const runYoloDetectionTick = useCallback(async () => {
+    if (!isMountedRef.current || pausedRef.current || isCapturingRef.current) return;
+    if (!cameraRef.current || !yoloModelRef.current?.isLoaded) return;
+
+    try {
+      isCapturingRef.current = true;
+      const photo = await cameraRef.current.takePictureAsync({ quality: 0.3, base64: false });
+      if (!photo?.uri) {
+        isCapturingRef.current = false;
+        return;
+      }
+
+      const result = await yoloModelRef.current.detect(photo.uri);
+      isCapturingRef.current = false;
+      FileSystem.deleteAsync(photo.uri, { idempotent: true }).catch(() => {});
+      if (!result || !isMountedRef.current) return;
+
+      const currentRoomId = sessionRef.current?.getState().currentRoomId;
+      if (currentRoomId && itemTrackerRef.current) {
+        itemTrackerRef.current.processDetections(
+          currentRoomId,
+          result.propertyRelevantObjects.map((obj) => ({
+            className: obj.className,
+            confidence: obj.confidence,
+          })),
+          Date.now(),
+        );
+        const itemCoverage = itemTrackerRef.current.getRoomCoverage(currentRoomId);
+        setDetectedItems([`${itemCoverage.verified}/${itemCoverage.total} items verified`]);
+      }
+    } catch (err) {
+      isCapturingRef.current = false;
+      console.warn("[YOLO] Detection error:", err);
+    }
+  }, []);
+
+  const stopYoloLoop = useCallback(() => {
+    if (yoloTimerRef.current) {
+      clearInterval(yoloTimerRef.current);
+      yoloTimerRef.current = null;
+    }
+  }, []);
+
+  const startYoloLoop = useCallback(() => {
+    if (!yoloModelRef.current?.isLoaded || yoloTimerRef.current) return;
+    yoloTimerRef.current = setInterval(() => {
+      void runYoloDetectionTick();
+    }, 3000);
+  }, [runYoloDetectionTick]);
+
+  const scheduleYoloLoad = useCallback((delayMs = 5000) => {
+    if (yoloModelRef.current?.isLoaded || yoloLoadTimerRef.current) return;
+    yoloLoadTimerRef.current = setTimeout(async () => {
+      yoloLoadTimerRef.current = null;
+      if (!isMountedRef.current || pausedRef.current) return;
+      try {
+        const yolo = await loadYoloModel();
+        if (!isMountedRef.current || pausedRef.current) {
+          yolo.dispose();
+          return;
+        }
+        yoloModelRef.current = yolo;
+        if (yolo.isLoaded) {
+          console.log("[YOLO] Model loaded — starting object detection loop");
+          startYoloLoop();
+        }
+      } catch (err) {
+        console.warn("[YOLO] Failed to load:", err);
+      }
+    }, delayMs);
+  }, [startYoloLoop]);
 
   useEffect(() => {
     autoCaptureEnabledRef.current = autoCaptureEnabled;
@@ -633,53 +717,7 @@ export default function InspectionCameraScreen() {
     const itemTracker = new ItemTracker();
     itemTrackerRef.current = itemTracker;
     // Deferred YOLO load — gives MobileCLIP time to fully initialize first
-    setTimeout(async () => {
-      if (!isMountedRef.current) return;
-      try {
-        const yolo = await loadYoloModel();
-        if (!isMountedRef.current) { yolo.dispose(); return; }
-        yoloModelRef.current = yolo;
-        if (yolo.isLoaded) {
-          console.log("[YOLO] Model loaded — starting object detection loop");
-          // Start YOLO detection loop at 3-second intervals
-          yoloTimerRef.current = setInterval(async () => {
-            if (!isMountedRef.current || pausedRef.current || isCapturingRef.current) return;
-            if (!cameraRef.current || !yoloModelRef.current?.isLoaded) return;
-            try {
-              // Hold camera mutex through entire capture + detect cycle
-              isCapturingRef.current = true;
-              const photo = await cameraRef.current.takePictureAsync({ quality: 0.3, base64: false });
-              if (!photo?.uri) { isCapturingRef.current = false; return; }
-              const result = await yoloModelRef.current.detect(photo.uri);
-              isCapturingRef.current = false; // Release mutex AFTER detect completes
-              FileSystem.deleteAsync(photo.uri, { idempotent: true }).catch(() => {});
-              if (!result || !isMountedRef.current) return;
-              // Feed detections to item tracker
-              const currentRoomId = sessionRef.current?.getState().currentRoomId;
-              if (currentRoomId && itemTrackerRef.current) {
-                itemTrackerRef.current.processDetections(
-                  currentRoomId,
-                  result.propertyRelevantObjects.map(obj => ({
-                    className: obj.className,
-                    confidence: obj.confidence,
-                  })),
-                  Date.now(),
-                );
-                const coverage = itemTrackerRef.current.getRoomCoverage(currentRoomId);
-                setDetectedItems(
-                  [`${coverage.verified}/${coverage.total} items verified`],
-                );
-              }
-            } catch (err) {
-              isCapturingRef.current = false;
-              console.warn("[YOLO] Detection error:", err);
-            }
-          }, 3000);
-        }
-      } catch (err) {
-        console.warn("[YOLO] Failed to load:", err);
-      }
-    }, 5000); // 5s delay to let MobileCLIP fully initialize
+    scheduleYoloLoad();
 
     // Initialize room detector
     const roomDetector = new RoomDetector();
@@ -1229,6 +1267,10 @@ export default function InspectionCameraScreen() {
       if (autoDetectReloadTimerRef.current) {
         clearTimeout(autoDetectReloadTimerRef.current);
       }
+      if (yoloLoadTimerRef.current) {
+        clearTimeout(yoloLoadTimerRef.current);
+        yoloLoadTimerRef.current = null;
+      }
       if (processingTimeoutId) {
         clearTimeout(processingTimeoutId);
       }
@@ -1238,10 +1280,7 @@ export default function InspectionCameraScreen() {
       batchAnalyzerRef.current = null;
       voiceRecorderRef.current?.dispose();
       voiceRecorderRef.current = null;
-      if (yoloTimerRef.current) {
-        clearInterval(yoloTimerRef.current);
-        yoloTimerRef.current = null;
-      }
+      stopYoloLoop();
       yoloModelRef.current?.dispose();
       yoloModelRef.current = null;
       itemTrackerRef.current = null;
@@ -1257,6 +1296,14 @@ export default function InspectionCameraScreen() {
       if (nextAppState === "background" || nextAppState === "inactive") {
         appStateRef.wasBackground = true;
         motionFilterRef.current?.stop();
+        if (voiceRecorderRef.current?.isRecording) {
+          setIsRecordingVoice(false);
+          void voiceRecorderRef.current?.cancelRecording();
+        }
+        if (yoloLoadTimerRef.current) {
+          clearTimeout(yoloLoadTimerRef.current);
+          yoloLoadTimerRef.current = null;
+        }
         if (autoCaptureTimerRef.current) {
           clearInterval(autoCaptureTimerRef.current);
           autoCaptureTimerRef.current = null;
@@ -1265,10 +1312,7 @@ export default function InspectionCameraScreen() {
           clearTimeout(roomDetectionTimerRef.current);
           roomDetectionTimerRef.current = null;
         }
-        if (yoloTimerRef.current) {
-          clearInterval(yoloTimerRef.current);
-          yoloTimerRef.current = null;
-        }
+        stopYoloLoop();
       } else if (nextAppState === "active" && appStateRef.wasBackground) {
         appStateRef.wasBackground = false;
         void (async () => {
@@ -1316,12 +1360,10 @@ export default function InspectionCameraScreen() {
               }
 
               // Restart YOLO detection if model is loaded and timer is dead
-              if (yoloModelRef.current?.isLoaded && !yoloTimerRef.current) {
-                yoloTimerRef.current = setInterval(async () => {
-                  if (!isMountedRef.current || pausedRef.current || isCapturingRef.current) return;
-                  if (!cameraRef.current || !yoloModelRef.current?.isLoaded) return;
-                  // (YOLO tick logic handled by the same interval callback pattern as initial setup)
-                }, 3000);
+              if (yoloModelRef.current?.isLoaded) {
+                startYoloLoop();
+              } else {
+                scheduleYoloLoad(1000);
               }
             }
           } catch (err) {
@@ -1345,14 +1387,18 @@ export default function InspectionCameraScreen() {
         clearTimeout(autoDetectReloadTimerRef.current);
         autoDetectReloadTimerRef.current = null;
       }
-      // Also dispose YOLO model + stop its timer to free additional memory
-      if (yoloTimerRef.current) {
-        clearInterval(yoloTimerRef.current);
-        yoloTimerRef.current = null;
+      if (yoloLoadTimerRef.current) {
+        clearTimeout(yoloLoadTimerRef.current);
+        yoloLoadTimerRef.current = null;
       }
+      // Also dispose YOLO model + stop its timer to free additional memory
+      stopYoloLoop();
       if (yoloModelRef.current?.isLoaded) {
         yoloModelRef.current.dispose();
         yoloModelRef.current = null;
+      }
+      if (AppState.currentState === "active" && !pausedRef.current) {
+        scheduleYoloLoad(10000);
       }
       // Dispose MobileCLIP ONNX model to free memory, then reload it once the app has a
       // chance to breathe so auto-detect is not silently lost for the session.
@@ -2396,12 +2442,22 @@ export default function InspectionCameraScreen() {
         if (detector && !roomDetectionTimerRef.current) {
           startRoomDetectionLoop(detector, session);
         }
+
+        if (yoloModelRef.current?.isLoaded) {
+          startYoloLoop();
+        } else {
+          scheduleYoloLoad(1000);
+        }
       } else {
         // Pausing — stop sensors and timers to save battery
         session.pause();
         comparison.pause();
         batchAnalyzerRef.current?.pause();
         motionFilterRef.current?.stop();
+        if (voiceRecorderRef.current?.isRecording || isRecordingVoice) {
+          setIsRecordingVoice(false);
+          void voiceRecorderRef.current?.cancelRecording();
+        }
 
         if (autoCaptureTimerRef.current) {
           clearInterval(autoCaptureTimerRef.current);
@@ -2411,15 +2467,12 @@ export default function InspectionCameraScreen() {
           clearTimeout(roomDetectionTimerRef.current);
           roomDetectionTimerRef.current = null;
         }
-        if (yoloTimerRef.current) {
-          clearInterval(yoloTimerRef.current);
-          yoloTimerRef.current = null;
-        }
+        stopYoloLoop();
       }
       return !p;
     });
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-  }, [startRoomDetectionLoop]);
+  }, [isRecordingVoice, scheduleYoloLoad, startRoomDetectionLoop, startYoloLoop, stopYoloLoop]);
 
   const handleToggleHandsFree = useCallback(() => {
     const session = sessionRef.current;
@@ -3167,7 +3220,7 @@ export default function InspectionCameraScreen() {
   const handleSubmitNote = useCallback(() => {
     const session = sessionRef.current;
     const text = noteText.trim();
-    if (!session || !text) return;
+    if (!session || !text || isRecordingVoice) return;
 
     const state = session.getState();
     const roomId = state.currentRoomId;
@@ -3202,7 +3255,7 @@ export default function InspectionCameraScreen() {
     setShowNoteModal(false);
     showCaptureHint("Note added");
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-  }, [noteText, showCaptureHint]);
+  }, [isRecordingVoice, noteText, showCaptureHint]);
 
   const handleDeleteNote = useCallback((findingId: string) => {
     Alert.alert(
@@ -3584,7 +3637,7 @@ export default function InspectionCameraScreen() {
           visible={showNoteModal}
           transparent
           animationType="slide"
-          onRequestClose={() => setShowNoteModal(false)}
+          onRequestClose={closeNoteModal}
         >
           <KeyboardAvoidingView
             behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -3596,7 +3649,7 @@ export default function InspectionCameraScreen() {
                 Describe the issue you see, or tap the mic to dictate
               </Text>
               {/* Voice note button */}
-              {voiceRecorderRef.current?.isAvailable && (
+              {voiceNotesAvailable && (
                 <TouchableOpacity
                   style={{
                     flexDirection: "row",
@@ -3649,20 +3702,17 @@ export default function InspectionCameraScreen() {
               <View style={styles.noteModalButtons}>
                 <TouchableOpacity
                   style={styles.noteModalCancel}
-                  onPress={() => {
-                    setNoteText("");
-                    setShowNoteModal(false);
-                  }}
+                  onPress={closeNoteModal}
                 >
                   <Text style={styles.noteModalCancelText}>Cancel</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[
                     styles.noteModalSubmit,
-                    !noteText.trim() && styles.noteModalSubmitDisabled,
+                    (!noteText.trim() || isRecordingVoice) && styles.noteModalSubmitDisabled,
                   ]}
                   onPress={handleSubmitNote}
-                  disabled={!noteText.trim()}
+                  disabled={!noteText.trim() || isRecordingVoice}
                 >
                   <Text style={styles.noteModalSubmitText}>Save Note</Text>
                 </TouchableOpacity>
