@@ -86,6 +86,7 @@ export interface ComparisonContext {
   roomName: string;
   baselineImageId?: string;
   triggerSource: ComparisonTriggerSource;
+  requestKey?: string;
 }
 
 /** Emitted when geometric verification passes (before AI analysis starts) */
@@ -272,6 +273,7 @@ export class ComparisonManager {
       inspectionId?: string;
       baselineImageId?: string;
       triggerSource?: ComparisonTriggerSource;
+      requestKey?: string;
       apiUrl: string;
       authToken: string;
       /** Telemetry only — server will verify independently */
@@ -414,6 +416,7 @@ export class ComparisonManager {
         roomName,
         baselineImageId: options.baselineImageId,
         triggerSource: options.triggerSource || "auto",
+        requestKey: options.requestKey,
       };
       let receivedResult = false;
       let resultUnavailable = false;

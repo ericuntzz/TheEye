@@ -308,8 +308,16 @@ export default function InspectionCameraScreen() {
   const globalKnownConditionsRef = useRef<string[]>([]);
   const announcerRef = useRef(new InspectionAnnouncer());
   const batchAnalyzerRef = useRef<BatchAnalyzer | null>(null);
-  /** Last captured frame data URI — stored so batch analyzer can use the SAME frame that earned coverage */
-  const lastCapturedFrameRef = useRef<{ dataUri: string; baselineId: string; baselineUrl: string; roomId: string; roomName: string; label?: string } | null>(null);
+  /** Captured frames waiting for verified callbacks, keyed by client request key */
+  const pendingBatchFramesRef = useRef<Map<string, {
+    dataUri: string;
+    baselineId: string;
+    baselineUrl: string;
+    roomId: string;
+    roomName: string;
+    label?: string;
+    createdAt: number;
+  }>>(new Map());
   const pausedRef = useRef(paused);
   const isMountedRef = useRef(true);
   const isProcessingRef = useRef(isProcessing);
@@ -338,6 +346,20 @@ export default function InspectionCameraScreen() {
   const roomConfidenceRef = useRef(0);
   const isAutoDetectReloadingRef = useRef(false);
   const needsAutoDetectReloadRef = useRef(false);
+
+  const makeRequestKey = useCallback(
+    () => `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+    [],
+  );
+
+  const sweepStalePendingBatchFrames = useCallback((maxAgeMs = 120_000) => {
+    const now = Date.now();
+    for (const [key, entry] of pendingBatchFramesRef.current) {
+      if (now - entry.createdAt > maxAgeMs) {
+        pendingBatchFramesRef.current.delete(key);
+      }
+    }
+  }, []);
   const autoDetectReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -592,6 +614,7 @@ export default function InspectionCameraScreen() {
     // Register verified callback — grants coverage credit early (~1-2s)
     comparison.onVerified((event, context) => {
       if (!isMountedRef.current) return;
+      sweepStalePendingBatchFrames();
 
       // Sweep stale pending entries (>90s) on every verified event
       const now = Date.now();
@@ -603,7 +626,7 @@ export default function InspectionCameraScreen() {
         }
       }
 
-      const { roomId, roomName, baselineImageId } = context;
+      const { roomId, roomName, baselineImageId, requestKey } = context;
       const resolvedBaseline = event.verifiedBaselineId
         ? getBaselineById(event.verifiedBaselineId)
         : baselineImageId
@@ -645,6 +668,9 @@ export default function InspectionCameraScreen() {
         // On-device path already handled coverage + haptics — just refresh waypoint dots
         // so the "analyzing" state shows up in the tri-state display
         updateCoverageUI(session, resolvedRoomId);
+        if (requestKey) {
+          pendingBatchFramesRef.current.delete(requestKey);
+        }
         return;
       }
 
@@ -690,9 +716,9 @@ export default function InspectionCameraScreen() {
       // Use the STORED frame from the comparison that earned this verified event,
       // NOT a fresh capture — avoids extra camera work and ensures the batch
       // analyzes the exact frame that earned coverage credit.
-      if (batchAnalyzerRef.current && resolvedBaselineId) {
-        const storedFrame = lastCapturedFrameRef.current;
-        if (storedFrame && storedFrame.baselineId === resolvedBaselineId) {
+      if (batchAnalyzerRef.current && requestKey) {
+        const storedFrame = pendingBatchFramesRef.current.get(requestKey);
+        if (storedFrame) {
           batchAnalyzerRef.current.addFrame({
             roomId: storedFrame.roomId,
             roomName: storedFrame.roomName,
@@ -702,6 +728,7 @@ export default function InspectionCameraScreen() {
             label: storedFrame.label,
             capturedAt: Date.now(),
           });
+          pendingBatchFramesRef.current.delete(requestKey);
         }
       }
 
@@ -725,7 +752,7 @@ export default function InspectionCameraScreen() {
     // Register finding callback
     comparison.onResult((result, context) => {
       if (!isMountedRef.current) return; // Skip state updates after unmount
-      const { roomId, roomName, baselineImageId, triggerSource } = context;
+      const { roomId, roomName, baselineImageId, triggerSource, requestKey } = context;
       const resolvedBaseline = result.verifiedBaselineId
         ? getBaselineById(result.verifiedBaselineId)
         : baselineImageId
@@ -754,6 +781,9 @@ export default function InspectionCameraScreen() {
       if (comparisonId) {
         pendingAnalysesRef.current.delete(comparisonId);
         verifiedComparisonIdsRef.current.delete(comparisonId);
+      }
+      if (requestKey) {
+        pendingBatchFramesRef.current.delete(requestKey);
       }
 
       // Transition waypoint state: analyzing → captured or issue_found
@@ -1035,6 +1065,7 @@ export default function InspectionCameraScreen() {
       }
       if (status === "error") {
         showCaptureHint("Adjusting - keep scanning");
+        sweepStalePendingBatchFrames(10_000);
         if (event?.comparisonId) {
           // Clean up all tracking for this failed comparison
           const pending = pendingAnalysesRef.current.get(event.comparisonId);
@@ -1128,6 +1159,7 @@ export default function InspectionCameraScreen() {
         clearTimeout(processingTimeoutId);
       }
       announcerRef.current.setEnabled(false);
+      pendingBatchFramesRef.current.clear();
       batchAnalyzerRef.current?.dispose();
       batchAnalyzerRef.current = null;
     };
@@ -2100,15 +2132,16 @@ export default function InspectionCameraScreen() {
       if (!isMountedRef.current || pausedRef.current) return;
       setLocalizationState("capturing");
       hasFirstAutoCaptureRef.current = true;
-      // Store the frame data so the batch analyzer can use the SAME frame that earned coverage
-      lastCapturedFrameRef.current = {
+      const requestKey = makeRequestKey();
+      pendingBatchFramesRef.current.set(requestKey, {
         dataUri: firstCapture.dataUri,
         baselineId: selectedBaseline.id,
         baselineUrl: selectedBaseline.imageUrl,
         roomId: selectedRoomId,
         roomName: selectedRoomName,
         label: selectedBaseline.label || undefined,
-      };
+        createdAt: Date.now(),
+      });
       void comparison.triggerComparison(
         captureFrame,
         selectedBaseline.imageUrl,
@@ -2120,6 +2153,7 @@ export default function InspectionCameraScreen() {
           inspectionId,
           baselineImageId: selectedBaseline.id,
           triggerSource: "auto",
+          requestKey,
           apiUrl,
           authToken: authSession.access_token,
           clientSimilarity: rerankedTopK[0]?.similarity ?? bestSimilarity,
@@ -2685,6 +2719,16 @@ export default function InspectionCameraScreen() {
 
     if (!isMountedRef.current) return;
     setLocalizationState("capturing");
+    const requestKey = makeRequestKey();
+    pendingBatchFramesRef.current.set(requestKey, {
+      dataUri: firstCapture.dataUri,
+      baselineId: selectedBaseline.id,
+      baselineUrl: selectedBaseline.imageUrl,
+      roomId: selectedRoomId,
+      roomName: selectedRoomName,
+      label: selectedBaseline.label || undefined,
+      createdAt: Date.now(),
+    });
     void comparison.triggerComparison(
       captureFrame,
       selectedBaseline.imageUrl,
@@ -2696,6 +2740,7 @@ export default function InspectionCameraScreen() {
         inspectionId,
         baselineImageId: selectedBaseline.id,
         triggerSource: "manual",
+        requestKey,
         apiUrl,
         authToken: authSession.access_token,
         clientSimilarity: rerankedTopK[0]?.similarity ?? locked?.similarity,
@@ -2808,6 +2853,16 @@ export default function InspectionCameraScreen() {
 
     setLocalizationState("capturing");
     setShowTargetAssist(false);
+    const requestKey = makeRequestKey();
+    pendingBatchFramesRef.current.set(requestKey, {
+      dataUri: capturedDataUri,
+      baselineId: resolved.id,
+      baselineUrl: resolved.imageUrl,
+      roomId: selectedRoomId,
+      roomName: selectedRoomName,
+      label: resolved.label || undefined,
+      createdAt: Date.now(),
+    });
     void comparison.triggerComparison(
       captureFrame,
       resolved.imageUrl,
@@ -2819,6 +2874,7 @@ export default function InspectionCameraScreen() {
         inspectionId,
         baselineImageId: resolved.id,
         triggerSource: "manual",
+        requestKey,
         apiUrl,
         authToken: authSession.access_token,
         clientSimilarity: 0,
