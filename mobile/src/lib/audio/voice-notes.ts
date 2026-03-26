@@ -21,6 +21,8 @@ export interface VoiceNoteResult {
 }
 
 export interface VoiceNoteRecorder {
+  /** Whether voice recording is available on this build */
+  isAvailable: boolean;
   /** Whether recording is currently active */
   isRecording: boolean;
   /** Start recording a voice note */
@@ -186,8 +188,12 @@ export function createVoiceNoteRecorder(
   };
 
   return {
+    /** Whether voice recording is available on this build */
+    get isAvailable() {
+      return getVoiceNotesCapability().supported;
+    },
     get isRecording() {
-      return recording !== null;
+      return recording !== null && !stopping;
     },
     startRecording,
     stopRecording,

@@ -1315,6 +1315,24 @@ export default function PropertyTrainingScreen() {
   }
 
   // ──── Results Phase ────
+  if (phase === "results" && !trainingResult) {
+    // Defensive fallback: results phase without data (e.g., cancel race condition)
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: 24 }}>
+          <Text style={{ fontSize: 16, color: colors.slate600, textAlign: "center", marginBottom: 16 }}>
+            Training completed but results were not available.
+          </Text>
+          <TouchableOpacity
+            style={{ backgroundColor: "#2372B8", paddingHorizontal: 32, paddingVertical: 14, borderRadius: 12 }}
+            onPress={() => navigation.goBack()}
+          >
+            <Text style={{ color: "#fff", fontSize: 16, fontWeight: "600", textAlign: "center" }}>Done</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
   if (phase === "results" && trainingResult) {
     const keptFrames = trainingResult.dedupe?.keptCount ?? captures.length;
     const droppedFrames = trainingResult.dedupe?.droppedCount ?? 0;

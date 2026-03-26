@@ -15,7 +15,7 @@ export type InspectionMode =
   | "maintenance"
   | "owner_arrival"
   | "vacancy_check";
-export type CompletionTier = "minimum" | "standard" | "thorough";
+export type CompletionTier = "not_started" | "minimum" | "standard" | "thorough";
 
 export interface InspectionEvent {
   eventType: string;
