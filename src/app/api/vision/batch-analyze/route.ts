@@ -132,7 +132,24 @@ Return ONLY valid JSON:
             console.warn(`[batch-analyze] Rejected unsafe baseline URL: ${frame.baselineUrl.slice(0, 80)}`);
             return null;
           }
-          const res = await fetch(frame.baselineUrl, { signal: AbortSignal.timeout(15000) });
+          // Defense-in-depth: only fetch from expected Supabase storage origin
+          const supabaseHost = process.env.NEXT_PUBLIC_SUPABASE_URL
+            ? new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).hostname
+            : null;
+          if (supabaseHost) {
+            try {
+              const urlHost = new URL(frame.baselineUrl).hostname;
+              if (!urlHost.endsWith(supabaseHost) && !urlHost.endsWith(".supabase.co")) {
+                console.warn(`[batch-analyze] Baseline URL not from Supabase: ${urlHost}`);
+                return null;
+              }
+            } catch { return null; }
+          }
+          // Disable redirect following to prevent SSRF via 302 to internal IPs
+          const res = await fetch(frame.baselineUrl, {
+            signal: AbortSignal.timeout(15000),
+            redirect: "error",
+          });
           if (!res.ok) return null;
           const buffer = await res.arrayBuffer();
           const rawType = (res.headers.get("content-type") || "image/jpeg").split(";")[0].trim();

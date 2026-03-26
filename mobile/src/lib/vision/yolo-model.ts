@@ -224,15 +224,21 @@ export async function loadYoloModel(): Promise<YoloModelLoader> {
         const w = isTransposed ? data[i * expectedChannels + 2] : data[2 * numDetections + i];
         const h = isTransposed ? data[i * expectedChannels + 3] : data[3 * numDetections + i];
 
+        // Map bbox from 640x640 tensor space back to original image space
+        // Subtract letterbox offset, then normalize by actual image dimensions
+        const bx = ((cx - w / 2) - xOffset) / width;
+        const by = ((cy - h / 2) - yOffset) / height;
+        const bw = w / width;
+        const bh = h / height;
         detections.push({
           className: COCO_CLASSES[maxClassId] || `class_${maxClassId}`,
           classId: maxClassId,
           confidence: maxScore,
           bbox: {
-            x: (cx - w / 2) / YOLO_INPUT_SIZE,
-            y: (cy - h / 2) / YOLO_INPUT_SIZE,
-            width: w / YOLO_INPUT_SIZE,
-            height: h / YOLO_INPUT_SIZE,
+            x: Math.max(0, bx),
+            y: Math.max(0, by),
+            width: Math.min(1 - Math.max(0, bx), bw),
+            height: Math.min(1 - Math.max(0, by), bh),
           },
         });
       }

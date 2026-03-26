@@ -116,6 +116,7 @@ export class BatchAnalyzer {
   }
 
   flushAllRooms(): void {
+    if (this.paused) return; // Respect pause state
     for (const [roomId, frames] of this.frameBuffer) {
       if (frames.length > 0) {
         this.frameBuffer.delete(roomId);
@@ -209,6 +210,22 @@ export class BatchAnalyzer {
 
   resume(): void {
     this.paused = false;
+    // Restart timers for any frames that were buffered during pause
+    for (const [roomId, frames] of this.frameBuffer) {
+      if (frames.length > 0 && !this.roomTimers.has(roomId)) {
+        if (frames.length >= this.config.batchSize) {
+          // Enough for a full batch — flush immediately
+          this.flushRoom(roomId);
+        } else {
+          // Set a timer to flush after the wait period
+          const timer = setTimeout(() => {
+            this.roomTimers.delete(roomId);
+            this.flushRoom(roomId);
+          }, this.config.maxBatchWaitMs);
+          this.roomTimers.set(roomId, timer);
+        }
+      }
+    }
   }
 
   dispose(): void {
