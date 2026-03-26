@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDbUser, isValidUUID, isSafeUrl } from "@/lib/auth";
 import { db } from "@/server/db";
+import { routeFindings, generateAutomationEvents } from "@/lib/automation/lanes";
 import {
   inspections,
   inspectionEvents,
@@ -100,7 +101,7 @@ export async function POST(
 
   // Validate all room IDs and baseline image IDs belong to this property
   const propertyRooms = await db
-    .select({ id: rooms.id })
+    .select({ id: rooms.id, name: rooms.name })
     .from(rooms)
     .where(eq(rooms.propertyId, inspection.propertyId));
 
@@ -343,6 +344,49 @@ export async function POST(
       findingsCount: totalFindings,
     },
   });
+
+  // Route confirmed findings to automation lanes (non-blocking)
+  try {
+    const confirmedFindings = roomResults.flatMap((r) =>
+      (r.findings || [])
+        .filter((f) => f.status !== "dismissed")
+        .map((f) => ({
+          id: f.id,
+          description: f.description || "",
+          severity: f.severity || "maintenance",
+          category: f.category || "condition",
+          findingCategory: f.findingCategory,
+          isClaimable: f.isClaimable,
+          roomId: r.roomId,
+          roomName: propertyRooms.find((rm) => rm.id === r.roomId)?.name,
+        })),
+    );
+
+    if (confirmedFindings.length > 0) {
+      const routing = routeFindings(inspection.propertyId, id, confirmedFindings);
+      const automationEvents = generateAutomationEvents(routing.actions);
+
+      // Emit automation events for downstream agents
+      for (const event of automationEvents) {
+        await emitEventSafe({
+          eventType: event.eventType as "DamageClaimCreated" | "MaintenanceTicketCreated" | "RestockTaskCreated" | "PresentationTaskCreated",
+          aggregateId: event.aggregateId,
+          propertyId: event.propertyId,
+          userId: dbUser.id,
+          payload: event.payload,
+        });
+      }
+
+      console.log(
+        `[automation] Routed ${confirmedFindings.length} findings: ` +
+        `${routing.summary.damageClaimCount} claims, ${routing.summary.maintenanceCount} maintenance, ` +
+        `${routing.summary.restockCount} restock, ${routing.summary.presentationCount} presentation`,
+      );
+    }
+  } catch (automationErr) {
+    // Non-critical — don't fail the inspection submission
+    console.warn("[automation] Failed to route findings:", automationErr);
+  }
 
   return NextResponse.json(
     {

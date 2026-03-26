@@ -11,7 +11,8 @@ export type AggregateType =
   | "claim"
   | "guest"
   | "condition"
-  | "system";
+  | "system"
+  | "automation_action";
 
 // ============================================================================
 // Property Events
@@ -404,6 +405,12 @@ export interface CoverageThresholdReachedPayload {
 // Union Types
 // ============================================================================
 
+export type AutomationEventType =
+  | "DamageClaimCreated"
+  | "MaintenanceTicketCreated"
+  | "RestockTaskCreated"
+  | "PresentationTaskCreated";
+
 export type EventType =
   | PropertyEventType
   | InspectionEventType
@@ -412,7 +419,8 @@ export type EventType =
   | ClaimsEventType
   | GuestEventType
   | ConditionEventType
-  | SystemEventType;
+  | SystemEventType
+  | AutomationEventType;
 
 // Payload type map for type-safe event emission
 export type EventPayloadMap = {
@@ -467,6 +475,11 @@ export type EventPayloadMap = {
   PresentationFindingDetected: PresentationFindingDetectedPayload;
   BaselineDeviationFlagged: BaselineDeviationFlaggedPayload;
   CoverageThresholdReached: CoverageThresholdReachedPayload;
+  // Automation
+  DamageClaimCreated: Record<string, unknown>;
+  MaintenanceTicketCreated: Record<string, unknown>;
+  RestockTaskCreated: Record<string, unknown>;
+  PresentationTaskCreated: Record<string, unknown>;
 };
 
 // Map event types to their aggregate type
@@ -514,7 +527,12 @@ export const EVENT_AGGREGATE_MAP: Record<EventType, AggregateType> = {
   PresentationFindingDetected: "system",
   BaselineDeviationFlagged: "system",
   CoverageThresholdReached: "system",
-};
+  // Automation
+  DamageClaimCreated: "automation_action",
+  MaintenanceTicketCreated: "automation_action",
+  RestockTaskCreated: "automation_action",
+  PresentationTaskCreated: "automation_action",
+} as const satisfies Record<EventType, AggregateType>;
 
 // Event metadata context
 export interface EventMetadata {
