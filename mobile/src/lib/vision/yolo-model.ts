@@ -119,10 +119,18 @@ export async function loadYoloModel(): Promise<YoloModelLoader> {
       // YOLO was trained on letterboxed images, not stretched ones
       const { decodeBase64JpegToRgb } = await import("./image-utils");
 
-      // First resize the longest edge to 640, maintaining aspect ratio
+      // Resize longest edge to 640, maintaining aspect ratio (true letterbox).
+      // The gray-padding fill below handles the remaining area.
+      // We use only width OR height — ImageManipulator scales proportionally.
+      const sourceInfo = await ImageManipulator.manipulateAsync(imageUri, [], {});
+      const srcW = sourceInfo.width || YOLO_INPUT_SIZE;
+      const srcH = sourceInfo.height || YOLO_INPUT_SIZE;
+      const scale = YOLO_INPUT_SIZE / Math.max(srcW, srcH);
+      const targetW = Math.round(srcW * scale);
+      const targetH = Math.round(srcH * scale);
       const resized = await ImageManipulator.manipulateAsync(
         imageUri,
-        [{ resize: { width: YOLO_INPUT_SIZE, height: YOLO_INPUT_SIZE } }],
+        [{ resize: { width: targetW, height: targetH } }],
         { format: ImageManipulator.SaveFormat.JPEG, base64: true, compress: 1.0 },
       );
 

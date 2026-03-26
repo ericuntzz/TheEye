@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDbUser } from "@/lib/auth";
+import { getDbUser, isSafeUrl } from "@/lib/auth";
 
 /**
  * POST /api/vision/batch-analyze
@@ -128,6 +128,10 @@ Return ONLY valid JSON:
     const baselineResults = await Promise.allSettled(
       batchFrames.map(async (frame) => {
         try {
+          if (!isSafeUrl(frame.baselineUrl)) {
+            console.warn(`[batch-analyze] Rejected unsafe baseline URL: ${frame.baselineUrl.slice(0, 80)}`);
+            return null;
+          }
           const res = await fetch(frame.baselineUrl, { signal: AbortSignal.timeout(15000) });
           if (!res.ok) return null;
           const buffer = await res.arrayBuffer();

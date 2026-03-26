@@ -100,6 +100,7 @@ export class BatchAnalyzer {
   }
 
   private flushRoom(roomId: string): void {
+    if (this.paused) return; // Don't flush while paused
     const frames = this.frameBuffer.get(roomId);
     if (!frames || frames.length === 0) return;
 
@@ -199,6 +200,11 @@ export class BatchAnalyzer {
 
   pause(): void {
     this.paused = true;
+    // Clear all pending timers so queued frames aren't flushed while paused
+    for (const [, timer] of this.roomTimers) {
+      clearTimeout(timer);
+    }
+    this.roomTimers.clear();
   }
 
   resume(): void {

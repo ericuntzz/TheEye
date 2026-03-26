@@ -183,13 +183,32 @@ export class ItemTracker {
       }
     }
 
-    // Match detections to expected items
+    // Match detections to expected items.
+    // IMPORTANT: Each detection only boosts ONE expected item (the least-verified
+    // unverified match). This prevents one chair detection from advancing
+    // multiple "chair" entries simultaneously and over-completing rooms.
+    const boostedThisFrame = new Set<string>();
     for (const detection of detections) {
       const matchedItems = this.findMatchingItems(roomId, detection.className);
 
-      for (const item of matchedItems) {
-        const conf = this.confidence.get(item.id);
-        if (!conf || conf.verified) continue;
+      // Pick the single best target: lowest confidence among unverified, unboosted matches
+      const candidates = matchedItems
+        .filter(item => {
+          const conf = this.confidence.get(item.id);
+          return conf && !conf.verified && !boostedThisFrame.has(item.id);
+        })
+        .sort((a, b) => {
+          const ca = this.confidence.get(a.id)?.confidence ?? 0;
+          const cb = this.confidence.get(b.id)?.confidence ?? 0;
+          return ca - cb; // lowest confidence first
+        });
+
+      const item = candidates[0];
+      if (!item) continue;
+      boostedThisFrame.add(item.id);
+
+      {
+        const conf = this.confidence.get(item.id)!;
 
         // Accumulate confidence weighted by detection confidence
         const gain = CONFIDENCE_PER_DETECTION * detection.confidence;
@@ -224,7 +243,7 @@ export class ItemTracker {
       }
     }
 
-    return gainedConfidence;
+    return gainedConfidence;  // eslint-disable-line -- end of processDetections
   }
 
   /**
