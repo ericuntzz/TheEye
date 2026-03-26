@@ -783,7 +783,7 @@ function StatCard({
 /* ─── Mobile Property Card ─────────────────────────────────── */
 function MobilePropertyCard({ property }: { property: Property }) {
   return (
-    <Link href={`/property/${property.id}`} aria-label={`View property: ${property.name}`}>
+    <Link href={`/property/${property.id}`} aria-label={`View property: ${property.name}`} className="rounded-2xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
       <div className="flex items-center gap-3.5 p-3 rounded-2xl bg-card border border-border active:bg-card/70 transition-colors">
         {/* Thumbnail */}
         <div className="h-14 w-14 rounded-xl bg-secondary flex items-center justify-center overflow-hidden shrink-0 relative">
@@ -791,7 +791,7 @@ function MobilePropertyCard({ property }: { property: Property }) {
           {property.coverImageUrl && (
             <img
               src={property.coverImageUrl}
-              alt=""
+              alt={`Photo of ${property.name}`}
               className="absolute inset-0 w-full h-full object-cover"
               onError={(e) => { e.currentTarget.style.display = "none"; }}
             />
@@ -845,14 +845,14 @@ function MobilePropertyCard({ property }: { property: Property }) {
 /* ─── Desktop Property Card ────────────────────────────────── */
 function DesktopPropertyCard({ property }: { property: Property }) {
   return (
-    <Link href={`/property/${property.id}`} aria-label={`View property: ${property.name}`}>
+    <Link href={`/property/${property.id}`} aria-label={`View property: ${property.name}`} className="rounded-xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
       <Card className="bg-card border-border cursor-pointer hover:border-primary/50 transition-all group overflow-hidden">
         <div className="h-32 bg-secondary rounded-t-lg flex items-center justify-center overflow-hidden relative">
           <Home className="h-8 w-8 text-muted-foreground" />
           {property.coverImageUrl && (
             <img
               src={property.coverImageUrl}
-              alt=""
+              alt={`Photo of ${property.name}`}
               className="absolute inset-0 w-full h-full object-cover"
               onError={(e) => { e.currentTarget.style.display = "none"; }}
             />
@@ -925,7 +925,7 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
 function TrainingBadge({ status }: { status: string | null }) {
   if (status === "trained") {
     return (
-      <span className="inline-flex items-center text-[10px] leading-normal px-2 py-0.5 rounded-full bg-success/10 text-green-600 border border-green-500/20 whitespace-nowrap shrink-0">
+      <span className="inline-flex items-center text-[10px] leading-normal px-2 py-0.5 rounded-full bg-success/10 text-green-800 border border-green-500/20 whitespace-nowrap shrink-0">
         Trained
       </span>
     );

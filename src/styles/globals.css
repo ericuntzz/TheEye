@@ -35,14 +35,14 @@
   --accent: #2372B8;
   --accent-foreground: #FFFFFF;
 
-  /* Destructive: Soft Red */
-  --destructive: #F87171;
+  /* Destructive: Red — darkened from #F87171 for WCAG AA contrast on ivory bg */
+  --destructive: #DC2626;
   --destructive-foreground: #FFFFFF;
 
   /* ── Semantic / Status Colors ──────────── */
   --success: #4ADE80;
   --warning: #FBBF24;
-  --error: #F87171;
+  --error: #DC2626;
   --info: #2372B8;
 
   /* ── Borders: Warm Stone ───────────────── */
