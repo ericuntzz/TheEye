@@ -143,53 +143,10 @@ export async function POST(
       );
     }
 
-    // Upsert logic: one row per (propertyId, findingFingerprint).
-    // - Dismiss: increment dismissCount, update action to "dismissed"
-    // - Confirm after dismiss: update action to "confirmed", reset dismissCount to 0
-    //   (removes suppression — the user is saying "this IS a real issue")
-    const [existing] = await db
-      .select({
-        id: findingFeedback.id,
-        dismissCount: findingFeedback.dismissCount,
-        action: findingFeedback.action,
-      })
-      .from(findingFeedback)
-      .where(
-        and(
-          eq(findingFeedback.propertyId, propertyId),
-          eq(findingFeedback.findingFingerprint, fingerprint),
-        ),
-      )
-      .limit(1);
-
-    if (existing) {
-      const newDismissCount = action === "dismissed"
-        ? (existing.dismissCount ?? 0) + 1
-        : 0; // Confirm resets dismiss count — removes suppression
-
-      await db
-        .update(findingFeedback)
-        .set({
-          action,
-          dismissCount: newDismissCount,
-          dismissReason: action === "dismissed" ? (dismissReason || null) : null,
-          findingDescription: description, // Update to latest description
-          findingCategory: category || null,
-          findingSeverity: severity || null,
-          updatedAt: new Date(),
-          inspectionId: inspectionId || null,
-        })
-        .where(eq(findingFeedback.id, existing.id));
-
-      return NextResponse.json({
-        id: existing.id,
-        dismissCount: newDismissCount,
-        upserted: true,
-      });
-    }
-
-    // Insert new feedback
-    const [inserted] = await db
+    // Atomic upsert: one row per (propertyId, findingFingerprint).
+    // - Dismiss: increment dismissCount and keep the latest metadata
+    // - Confirm after dismiss: reset dismissCount to 0 to remove suppression
+    const [saved] = await db
       .insert(findingFeedback)
       .values({
         propertyId,
@@ -204,12 +161,33 @@ export async function POST(
         dismissReason: action === "dismissed" ? (dismissReason || null) : null,
         dismissCount: action === "dismissed" ? 1 : 0,
       })
-      .returning({ id: findingFeedback.id });
+      .onConflictDoUpdate({
+        target: [findingFeedback.propertyId, findingFeedback.findingFingerprint],
+        set: {
+          inspectionId: inspectionId || null,
+          roomId: roomId || null,
+          baselineImageId: baselineImageId || null,
+          findingDescription: description,
+          findingCategory: category || null,
+          findingSeverity: severity || null,
+          action,
+          dismissReason: action === "dismissed" ? (dismissReason || null) : null,
+          dismissCount:
+            action === "dismissed"
+              ? sql`COALESCE(${findingFeedback.dismissCount}, 0) + 1`
+              : 0,
+          updatedAt: new Date(),
+        },
+      })
+      .returning({
+        id: findingFeedback.id,
+        dismissCount: findingFeedback.dismissCount,
+      });
 
     return NextResponse.json({
-      id: inserted?.id,
-      dismissCount: action === "dismissed" ? 1 : 0,
-      upserted: false,
+      id: saved?.id,
+      dismissCount: saved?.dismissCount ?? (action === "dismissed" ? 1 : 0),
+      upserted: true,
     }, { status: 201 });
   } catch (error) {
     console.error("[properties/[id]/feedback] POST error:", error);
