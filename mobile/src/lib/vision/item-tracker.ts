@@ -126,7 +126,7 @@ export type ItemEventCallback = (event: {
   metadata?: Record<string, unknown>;
 }) => void;
 
-export type CompletionTier = "minimum" | "standard" | "thorough";
+export type CompletionTier = "not_started" | "minimum" | "standard" | "thorough";
 
 export class ItemTracker {
   private expectedItems: Map<string, ExpectedItem[]> = new Map();
@@ -308,14 +308,14 @@ export class ItemTracker {
     if (coverage.total === 0) return "minimum";
     if (coverage.percentage >= 100) return "thorough";
     if (coverage.percentage >= 60) return "standard";
-    // Check if at least 1 critical/high item is verified
+    // Below 60%: check if at least 1 critical/high item is verified
     const roomItems = this.expectedItems.get(roomId) || [];
     const hasCritical = roomItems.some(
       (item) =>
         (item.importance === "critical" || item.importance === "high") &&
         this.confidence.get(item.id)?.verified,
     );
-    return "minimum";
+    return hasCritical ? "minimum" : "not_started";
   }
 
   /**

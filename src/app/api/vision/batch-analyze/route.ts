@@ -65,10 +65,15 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
-    // Validate currentImage fields are actual data URIs, not URLs (prevents misuse)
+    // Validate currentImage fields: must be data URIs, max 5MB each (prevents DoS)
+    const MAX_FRAME_SIZE = 5_000_000; // 5MB base64 string length
     const batchFrames = frames.filter((f: { currentImage?: string }) => {
       if (!f.currentImage || !f.currentImage.startsWith("data:image/")) {
         console.warn("[batch-analyze] Rejected frame with non-data-URI currentImage");
+        return false;
+      }
+      if (f.currentImage.length > MAX_FRAME_SIZE) {
+        console.warn(`[batch-analyze] Rejected oversized frame: ${f.currentImage.length} bytes`);
         return false;
       }
       return true;

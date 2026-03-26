@@ -109,11 +109,31 @@ export async function POST(
       dismissReason,
     } = body;
 
+    if (typeof fingerprint !== "string" || typeof description !== "string" || typeof action !== "string") {
+      return NextResponse.json(
+        { error: "findingFingerprint, findingDescription, and action must be strings" },
+        { status: 400 },
+      );
+    }
     if (!fingerprint || !description || !action) {
       return NextResponse.json(
         { error: "findingFingerprint, findingDescription, and action are required" },
         { status: 400 },
       );
+    }
+    // Validate optional UUIDs
+    if (inspectionId && !isValidUUID(inspectionId)) {
+      return NextResponse.json({ error: "Invalid inspectionId" }, { status: 400 });
+    }
+    if (roomId && !isValidUUID(roomId)) {
+      return NextResponse.json({ error: "Invalid roomId" }, { status: 400 });
+    }
+    if (baselineImageId && !isValidUUID(baselineImageId)) {
+      return NextResponse.json({ error: "Invalid baselineImageId" }, { status: 400 });
+    }
+    // Length validation
+    if (fingerprint.length > 200 || description.length > 1000) {
+      return NextResponse.json({ error: "Field too long" }, { status: 400 });
     }
 
     if (!["confirmed", "dismissed"].includes(action)) {
