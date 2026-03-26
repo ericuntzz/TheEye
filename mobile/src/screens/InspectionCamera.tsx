@@ -1325,6 +1325,14 @@ export default function InspectionCameraScreen() {
             const latestPermission = await getPermission();
             if (!latestPermission.granted) {
               console.warn("[InspectionCamera] Camera permission revoked while backgrounded");
+              Alert.alert(
+                "Camera Access Required",
+                "Camera permission was revoked. Please re-enable it in Settings to continue the inspection.",
+                [
+                  { text: "Open Settings", onPress: () => Linking.openSettings() },
+                  { text: "End Inspection", style: "destructive", onPress: () => handleEndInspection() },
+                ],
+              );
               return;
             }
 

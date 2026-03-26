@@ -1079,7 +1079,7 @@ export default function PropertyTrainingScreen() {
   // ──── Intro Phase ────
   if (phase === "intro") {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
         <View style={styles.introContent}>
           <TouchableOpacity
             style={styles.backButton}
@@ -1182,7 +1182,7 @@ export default function PropertyTrainingScreen() {
     const stepIndex = phase === "uploading" ? 0 : 1;
 
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
         <View style={styles.processingContainer}>
           {/* Animated spinner area */}
           <View style={styles.spinnerArea}>
@@ -1318,7 +1318,7 @@ export default function PropertyTrainingScreen() {
   if (phase === "results" && !trainingResult) {
     // Defensive fallback: results phase without data (e.g., cancel race condition)
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
         <View style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: 24 }}>
           <Text style={{ fontSize: 16, color: colors.slate600, textAlign: "center", marginBottom: 16 }}>
             Training completed but results were not available.
@@ -1339,7 +1339,7 @@ export default function PropertyTrainingScreen() {
     const uploadedVideos = trainingResult.mediaSummary?.uploadedVideos ?? 0;
 
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
         <ScrollView contentContainerStyle={styles.resultsContent}>
           {/* Success Header */}
           <View style={styles.successHeader}>
@@ -1593,7 +1593,7 @@ export default function PropertyTrainingScreen() {
       )}
 
       {/* Bottom Controls */}
-      <SafeAreaView style={styles.cameraBottomControls}>
+      <SafeAreaView style={styles.cameraBottomControls} edges={["bottom"]}>
         {/* Thumbnail strip with visible X delete buttons */}
         {captures.length > 0 && (
           <FlatList
