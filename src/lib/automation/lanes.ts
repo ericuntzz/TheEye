@@ -93,7 +93,7 @@ export function routeFindings(
     const priority = classifyPriority(finding);
 
     actions.push({
-      id: `action_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      id: crypto.randomUUID(),
       lane,
       priority,
       title: generateActionTitle(lane, finding),

@@ -195,7 +195,7 @@ export interface FindingSuggestedPayload {
   roomName: string;
   baselineImageId?: string;
   currentImageUrl?: string;
-  findingCategory: "condition" | "presentation";
+  findingCategory: "condition" | "presentation" | "restock";
   isClaimable: boolean;
 }
 

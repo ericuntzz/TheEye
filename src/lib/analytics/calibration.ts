@@ -66,31 +66,30 @@ export async function generateCalibrationReport(
     return emptyReport();
   }
 
-  // Get all feedback for user's properties
-  const allFeedback = await db
+  // Get feedback scoped to user's properties (not all feedback — data isolation)
+  const { inArray } = await import("drizzle-orm");
+  const userFeedback = await db
     .select()
     .from(findingFeedback)
-    .where(gte(findingFeedback.createdAt, cutoff))
+    .where(
+      and(
+        inArray(findingFeedback.propertyId, propertyIds),
+        gte(findingFeedback.createdAt, cutoff),
+      ),
+    )
     .orderBy(desc(findingFeedback.dismissCount));
 
-  // Filter to user's properties
-  const userFeedback = allFeedback.filter((f) => propertyIds.includes(f.propertyId));
-
-  // Get recent inspections count
-  const recentInspections = await db
+  // Get recent inspections scoped to user (inspector_id = userId)
+  const userInspections = await db
     .select({ id: inspections.id })
     .from(inspections)
     .where(
       and(
+        eq(inspections.inspectorId, userId),
         gte(inspections.startedAt, cutoff),
         eq(inspections.status, "completed"),
       ),
     );
-
-  const userInspections = recentInspections.filter((i) =>
-    // Filter by user's inspections (inspector_id matches)
-    true, // TODO: join on inspectorId = userId
-  );
 
   // Calculate finding accuracy by category
   const categoryStats: Record<string, { confirmed: number; dismissed: number }> = {};
@@ -123,19 +122,23 @@ export async function generateCalibrationReport(
       propertyId: f.propertyId,
     }));
 
-  // Stubborn baselines — from inspection events where uncaptured_baselines_at_end was logged
-  const stubbornEvents = await db
-    .select({
-      metadata: inspectionEvents.metadata,
-      roomId: inspectionEvents.roomId,
-    })
-    .from(inspectionEvents)
-    .where(
-      and(
-        eq(inspectionEvents.eventType, "uncaptured_baselines_at_end"),
-        gte(inspectionEvents.timestamp, cutoff),
-      ),
-    );
+  // Stubborn baselines — from inspection events scoped to user's inspections
+  const userInspectionIds = userInspections.map((i) => i.id);
+  const stubbornEvents = userInspectionIds.length > 0
+    ? await db
+        .select({
+          metadata: inspectionEvents.metadata,
+          roomId: inspectionEvents.roomId,
+        })
+        .from(inspectionEvents)
+        .where(
+          and(
+            inArray(inspectionEvents.inspectionId, userInspectionIds),
+            eq(inspectionEvents.eventType, "uncaptured_baselines_at_end"),
+            gte(inspectionEvents.timestamp, cutoff),
+          ),
+        )
+    : [];
 
   const stubbornCounts = new Map<string, { label: string; count: number; propertyId: string; roomId: string }>();
   for (const event of stubbornEvents) {
