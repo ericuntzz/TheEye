@@ -32,12 +32,13 @@ export function getVideoTrainingCapability(): FeatureCapability {
   }
 
   if (!buildCapabilities.hasExpoAvNativeModule) {
+    // Video thumbnails work but we can't read video duration for extended sampling.
+    // This is fine for clips under 60s (our recording cap). Don't alarm the user.
     return {
       supported: true,
       optimized: false,
-      reason:
-        "Video training works in this build, but duration-aware frame selection is unavailable.",
-      recoveryHint: "Short, steady clips will produce the best training frames.",
+      reason: undefined,
+      recoveryHint: "Short, steady clips produce the best training frames.",
     };
   }
 

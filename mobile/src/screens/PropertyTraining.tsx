@@ -1863,9 +1863,9 @@ const styles = StyleSheet.create({
 
   // ── Intro Phase ──
   introContent: {
-    flexGrow: 1,
     padding: 20,
     paddingTop: 12,
+    paddingBottom: 40,
   },
   backButton: {
     marginBottom: 20,
