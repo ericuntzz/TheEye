@@ -1086,11 +1086,13 @@ export default function PropertyTrainingScreen() {
     }
 
     Alert.alert(
-      isAddMore ? "Add to Training" : "Start Training",
-      `Upload ${captures.length} item${captures.length !== 1 ? "s" : ""} and ${isAddMore ? "re-train" : "train"} AI on this property? This may take a minute.`,
+      isAddMore ? "Add Photos to Training" : "Start Training",
+      isAddMore
+        ? `Upload ${captures.length} new photo${captures.length !== 1 ? "s" : ""} and update the AI training? Your existing training data is preserved.`
+        : `Upload ${captures.length} item${captures.length !== 1 ? "s" : ""} and train AI on this property? This may take a minute.`,
       [
         { text: "Cancel", style: "cancel" },
-        { text: isAddMore ? "Re-train" : "Train", style: "default", onPress: handleUploadAndTrain },
+        { text: isAddMore ? "Add & Update" : "Train", style: "default", onPress: handleUploadAndTrain },
       ],
     );
   }, [captures, hasUsableVideoTrainingFrames, isAddMore, handleUploadAndTrain, videoTrainingCapability]);
@@ -1443,9 +1445,9 @@ export default function PropertyTrainingScreen() {
             }}
             activeOpacity={0.8}
           >
-            <Text style={styles.addMoreButtonText}>Add More</Text>
+            <Text style={styles.addMoreButtonText}>Add More Photos</Text>
             <Text style={styles.addMoreButtonSub}>
-              Re-train with additional photos
+              Capture more angles to improve accuracy
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
