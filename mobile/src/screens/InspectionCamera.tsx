@@ -2106,6 +2106,7 @@ export default function InspectionCameraScreen() {
 
           const detector = roomDetectorRef.current;
           const session = sessionRef.current;
+          const comparison = comparisonRef.current;
           if (
             detector &&
             session &&
@@ -2113,6 +2114,17 @@ export default function InspectionCameraScreen() {
             !roomDetectionTimerRef.current
           ) {
             startRoomDetectionLoop(detector, session);
+          }
+          if (
+            session &&
+            comparison &&
+            autoCaptureEnabledRef.current &&
+            !pausedRef.current &&
+            !autoCaptureTimerRef.current
+          ) {
+            autoCaptureTimerRef.current = setInterval(() => {
+              void autoCapturTickRef.current?.(session, comparison);
+            }, AUTO_CAPTURE_INTERVAL_MS);
           }
           return;
         }
