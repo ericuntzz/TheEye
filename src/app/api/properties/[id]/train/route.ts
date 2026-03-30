@@ -86,8 +86,8 @@ function normalizeInspectionLabel(
     return `Detail spot ${fallbackIndex + 1}`;
   }
 
-  // Last resort — at least give a spatial hint instead of just a number
-  return `${fallbackRoomName} spot ${fallbackIndex + 1}`;
+  // Last resort — use numbered area label that the client can display cleanly
+  return `${fallbackRoomName} area ${fallbackIndex + 1}`;
 }
 
 function stripRoomNamePrefix(label: string, roomName: string): string {

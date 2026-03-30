@@ -11,7 +11,7 @@ export interface InspectionDisplayTarget {
 }
 
 const GENERIC_NUMBERED_LABEL_RE =
-  /^(?:view|angle|area|shot|photo|image|picture|frame)\s+(\d+)$/i;
+  /^(?:view|angle|area|spot|shot|photo|image|picture|frame)\s+(\d+)$/i;
 const GENERIC_TYPED_LABEL_RE =
   /^(?:room overview|overview|detail(?: view)?|close[- ]?up(?: check)?)(?:\s+(\d+))?$/i;
 
@@ -53,11 +53,16 @@ function formatGenericLabel(
   imageType: InspectionDisplayMetadata["imageType"],
   viewNumber?: string,
 ): string {
-  const suffix = viewNumber ? ` ${viewNumber}` : "";
-  if (imageType === "overview") return `Wide view${suffix}`;
-  if (imageType === "required_detail") return `Close-up${suffix}`;
-  if (imageType === "detail") return `Detail${suffix}`;
-  return viewNumber ? `Area ${viewNumber}` : "Area to check";
+  if (imageType === "overview") return viewNumber ? `Wide view ${viewNumber}` : "Wide view";
+  if (imageType === "required_detail") return viewNumber ? `Close-up ${viewNumber}` : "Close-up";
+  if (imageType === "detail") return viewNumber ? `Detail ${viewNumber}` : "Detail";
+  // For unlabeled standard views, use spatial hints instead of generic numbers
+  if (viewNumber) {
+    const hints = ["Left side", "Center view", "Right side", "Far wall", "Near entry", "Corner"];
+    const idx = (parseInt(viewNumber, 10) - 1) % hints.length;
+    return hints[idx];
+  }
+  return "Area to check";
 }
 
 function getGenericLabelMatch(label: string): RegExpMatchArray | null {
