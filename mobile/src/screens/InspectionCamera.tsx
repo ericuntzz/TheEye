@@ -13,6 +13,7 @@ import {
   Platform,
   Linking,
   Animated,
+  ActivityIndicator,
   AppState,
   type AppStateStatus,
 } from "react-native";
@@ -393,17 +394,14 @@ export default function InspectionCameraScreen() {
     if (!isMountedRef.current || pausedRef.current || isCapturingRef.current) return;
     if (!cameraRef.current || !yoloModelRef.current?.isLoaded) return;
 
+    isCapturingRef.current = true;
+    let photoUri: string | null = null;
     try {
-      isCapturingRef.current = true;
       const photo = await cameraRef.current.takePictureAsync({ quality: 0.3, base64: false });
-      if (!photo?.uri) {
-        isCapturingRef.current = false;
-        return;
-      }
+      if (!photo?.uri) return;
+      photoUri = photo.uri;
 
-      const result = await yoloModelRef.current.detect(photo.uri);
-      isCapturingRef.current = false;
-      FileSystem.deleteAsync(photo.uri, { idempotent: true }).catch(() => {});
+      const result = await yoloModelRef.current.detect(photoUri);
       if (!result || !isMountedRef.current) return;
 
       const currentRoomId = sessionRef.current?.getState().currentRoomId;
@@ -420,8 +418,10 @@ export default function InspectionCameraScreen() {
         setDetectedItems([`${itemCoverage.verified}/${itemCoverage.total} items verified`]);
       }
     } catch (err) {
-      isCapturingRef.current = false;
       console.warn("[YOLO] Detection error:", err);
+    } finally {
+      isCapturingRef.current = false;
+      if (photoUri) FileSystem.deleteAsync(photoUri, { idempotent: true }).catch(() => {});
     }
   }, []);
 
@@ -2772,6 +2772,7 @@ export default function InspectionCameraScreen() {
           "Inspection ended and results were saved on-device. They will auto-sync when your connection is available.",
         );
       } catch {
+        setSubmissionStatus(null); // Clear stuck overlay on double-failure
         Alert.alert(
           "Sync warning",
           "Inspection ended, but we could not sync or queue results on this device.",
@@ -3986,9 +3987,7 @@ export default function InspectionCameraScreen() {
       {submissionStatus && (
         <View style={styles.submissionOverlay}>
           <View style={styles.submissionCard}>
-            <Animated.View style={{ transform: [{ rotate: '0deg' }] }}>
-              <Ionicons name="sync-outline" size={28} color="#2372B8" />
-            </Animated.View>
+            <ActivityIndicator size="large" color="#2372B8" />
             <Text style={styles.submissionText}>{submissionStatus}</Text>
             <Text style={styles.submissionSubtext}>Coverage is already saved</Text>
           </View>
