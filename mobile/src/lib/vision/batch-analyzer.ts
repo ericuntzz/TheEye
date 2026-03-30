@@ -26,6 +26,8 @@ export interface BatchAnalysisConfig {
   inspectionMode?: "turnover" | "maintenance" | "owner_arrival" | "vacancy_check";
   /** Known conditions to suppress in batch analysis (prevents re-alerting on dismissed findings) */
   knownConditions?: string[];
+  /** Property ID for server-side feedback lookup */
+  propertyId?: string;
 }
 
 const DEFAULT_CONFIG: BatchAnalysisConfig = {
@@ -189,6 +191,7 @@ export class BatchAnalyzer {
           roomName,
           inspectionMode: this.config.inspectionMode || "turnover",
           knownConditions: this.config.knownConditions || [],
+          propertyId: this.config.propertyId || undefined,
           frames: frames.map((f) => ({
             currentImage: f.dataUri,
             baselineUrl: f.baselineUrl,

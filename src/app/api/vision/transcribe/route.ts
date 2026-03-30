@@ -28,6 +28,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "audio file is required" }, { status: 400 });
     }
 
+    // Validate MIME type — only accept audio formats
+    const ALLOWED_AUDIO_TYPES = ["audio/mp4", "audio/m4a", "audio/x-m4a", "audio/mpeg", "audio/wav", "audio/webm", "audio/ogg", "audio/aac"];
+    const audioType = audioFile.type?.toLowerCase().split(";")[0]?.trim();
+    if (!audioType || !ALLOWED_AUDIO_TYPES.includes(audioType)) {
+      return NextResponse.json(
+        { error: `Unsupported audio format: ${audioType || "unknown"}. Accepted: ${ALLOWED_AUDIO_TYPES.join(", ")}` },
+        { status: 400 },
+      );
+    }
+
     // Validate file size (max 25MB — Whisper API limit)
     const MAX_AUDIO_SIZE = 25 * 1024 * 1024;
     if (audioFile.size > MAX_AUDIO_SIZE) {

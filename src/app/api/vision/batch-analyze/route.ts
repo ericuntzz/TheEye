@@ -32,6 +32,7 @@ export async function POST(request: NextRequest) {
     let body: {
       roomId?: string;
       roomName?: string;
+      propertyId?: string;
       frames?: Array<{
         currentImage: string;
         baselineUrl: string;
@@ -48,7 +49,41 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
     }
 
-    const { roomName, frames, inspectionMode = "turnover", knownConditions = [] } = body;
+    const { roomName, frames, propertyId: batchPropertyId, inspectionMode = "turnover", knownConditions: rawConditions = [] } = body;
+    // Validate knownConditions — filter to strings only (prevents prompt injection via objects)
+    const validatedConditions = Array.isArray(rawConditions)
+      ? rawConditions.filter((c: unknown): c is string => typeof c === "string" && c.length > 0 && c.length < 500)
+      : [];
+
+    // Merge server-side finding feedback: findings dismissed 2+ times → known conditions
+    if (batchPropertyId && typeof batchPropertyId === "string") {
+      try {
+        const { db } = await import("@/server/db");
+        const { findingFeedback } = await import("@/server/schema");
+        const { eq, and, gte } = await import("drizzle-orm");
+        const dismissed = await db
+          .select({ description: findingFeedback.findingDescription })
+          .from(findingFeedback)
+          .where(
+            and(
+              eq(findingFeedback.propertyId, batchPropertyId),
+              eq(findingFeedback.action, "dismissed"),
+              gte(findingFeedback.dismissCount, 2),
+            ),
+          );
+        for (const d of dismissed) {
+          const prefixed = `[Previously dismissed] ${d.description}`;
+          if (d.description && !validatedConditions.includes(prefixed)) {
+            validatedConditions.push(prefixed);
+          }
+        }
+      } catch (err) {
+        console.warn("[batch-analyze] Failed to load finding feedback:", err);
+      }
+    }
+
+    // Alias for downstream usage
+    const knownConditions = validatedConditions;
 
     if (!roomName || !frames || !Array.isArray(frames) || frames.length === 0) {
       return NextResponse.json(

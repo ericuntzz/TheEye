@@ -227,6 +227,7 @@ export default function InspectionCameraScreen() {
   const [submissionStatus, setSubmissionStatus] = useState<string | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
+  const [bottomControlsHeight, setBottomControlsHeight] = useState(0);
   const voiceRecorderRef = useRef<VoiceNoteRecorder | null>(null);
   const yoloModelRef = useRef<YoloModelLoader | null>(null);
   const itemTrackerRef = useRef<ItemTracker | null>(null);
@@ -674,6 +675,7 @@ export default function InspectionCameraScreen() {
       },
       inspectionMode,
       knownConditions: globalKnownConditionsRef.current || [],
+      propertyId,
     });
     batchAnalyzer.setResultCallback((result) => {
       if (!isMountedRef.current) return;
@@ -3379,11 +3381,24 @@ export default function InspectionCameraScreen() {
         : "Scanning for room";
   const pendingWaypoints = roomWaypoints.filter((waypoint) => !waypoint.scanned);
   const primaryPendingWaypoint = pendingWaypoints[0] ?? null;
+  const suggestedFindings = findings.filter((finding) => finding.status === "suggested");
+  const issueReviewPrompt =
+    suggestedFindings.length > 0
+      ? suggestedFindings.length === 1
+        ? "⚠️ Issue found below — swipe up to review"
+        : `⚠️ ${suggestedFindings.length} issues found below — swipe up to review`
+      : null;
+  const shouldCondenseIssuePrompt =
+    !!issueReviewPrompt &&
+    typeof captureHint === "string" &&
+    captureHint.trim().startsWith("⚠️");
   const bottomPrompt =
-    captureHint ||
+    (shouldCondenseIssuePrompt ? issueReviewPrompt : captureHint) ||
     (primaryPendingWaypoint && pendingWaypoints.length === 1
       ? `Still needed: ${primaryPendingWaypoint.label || "1 remaining view"}`
       : null);
+  const findingsBottomInset =
+    Math.max(bottomControlsHeight, bottomPrompt ? 160 : 108) + 8;
 
   return (
     <View style={styles.container}>
@@ -3603,7 +3618,16 @@ export default function InspectionCameraScreen() {
         )}
 
         {/* Bottom controls */}
-        <SafeAreaView style={styles.bottomControls} edges={["bottom"]}>
+        <SafeAreaView
+          style={styles.bottomControls}
+          edges={["bottom"]}
+          onLayout={(event) => {
+            const nextHeight = Math.ceil(event.nativeEvent.layout.height);
+            setBottomControlsHeight((prevHeight) =>
+              Math.abs(prevHeight - nextHeight) > 1 ? nextHeight : prevHeight,
+            );
+          }}
+        >
           {bottomPrompt && (
             <View style={styles.captureHintBubble}>
               <Text style={styles.captureHintText}>{bottomPrompt}</Text>
@@ -3934,9 +3958,10 @@ export default function InspectionCameraScreen() {
 
       {/* Findings Panel */}
       <FindingsPanel
-        findings={findings.filter((f) => f.status === "suggested")}
+        findings={suggestedFindings}
         onConfirm={handleConfirmFinding}
         onDismiss={handleDismissFinding}
+        bottomInset={findingsBottomInset}
       />
 
       {/* Loading overlay — shown while baselines are loading */}
