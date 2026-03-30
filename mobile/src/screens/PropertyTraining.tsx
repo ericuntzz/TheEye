@@ -202,6 +202,70 @@ export default function PropertyTrainingScreen() {
   const uploadedIdsRef = useRef<Map<string, string[]>>(new Map());
   const cancelRequestedRef = useRef(false);
   const runIdRef = useRef(0);
+
+  // ── Background Upload Queue ──
+  // Each photo starts uploading immediately after capture. By the time user taps "Done",
+  // most/all uploads are already complete, dramatically reducing perceived wait time.
+  type UploadStatus = "pending" | "uploading" | "uploaded" | "failed";
+  const [uploadStatuses, setUploadStatuses] = useState<Map<string, UploadStatus>>(new Map());
+  const uploadQueueRef = useRef<Set<string>>(new Set()); // capture IDs queued for upload
+  const uploadActiveRef = useRef(false); // mutex to prevent concurrent queue processing
+  const uploadCancelledRef = useRef(false);
+
+  const processUploadQueue = useCallback(async () => {
+    if (uploadActiveRef.current || uploadCancelledRef.current) return;
+    uploadActiveRef.current = true;
+
+    try {
+      const pending = capturesRef.current.filter(
+        (c) => c.type === "photo" && uploadQueueRef.current.has(c.id) && !uploadedIdsRef.current.has(c.id),
+      );
+
+      for (const capture of pending) {
+        if (uploadCancelledRef.current) break;
+        if (uploadedIdsRef.current.has(capture.id)) continue; // already done
+
+        // Mark as uploading
+        setUploadStatuses((prev) => new Map(prev).set(capture.id, "uploading"));
+
+        try {
+          const result = await uploadBase64Image(
+            `data:image/jpeg;base64,${capture.base64}`,
+            propertyId,
+            `training-${Date.now()}.jpg`,
+          );
+          uploadedIdsRef.current.set(capture.id, [result.id]);
+          uploadQueueRef.current.delete(capture.id);
+          setUploadStatuses((prev) => new Map(prev).set(capture.id, "uploaded"));
+        } catch (err) {
+          console.warn("[BackgroundUpload] Failed for capture", capture.id, err);
+          setUploadStatuses((prev) => new Map(prev).set(capture.id, "failed"));
+          // Don't block queue — continue with other captures
+        }
+      }
+    } finally {
+      uploadActiveRef.current = false;
+    }
+  }, [propertyId]);
+
+  // Trigger background upload when new photo captures are added
+  useEffect(() => {
+    if (phase !== "capturing") return;
+
+    const newPhotos = captures.filter(
+      (c) => c.type === "photo" && !uploadQueueRef.current.has(c.id) && !uploadedIdsRef.current.has(c.id),
+    );
+
+    if (newPhotos.length === 0) return;
+
+    for (const photo of newPhotos) {
+      uploadQueueRef.current.add(photo.id);
+      setUploadStatuses((prev) => new Map(prev).set(photo.id, "pending"));
+    }
+
+    // Process queue in background (fire-and-forget)
+    void processUploadQueue();
+  }, [captures, phase, processUploadQueue]);
   const trainingAbortRef = useRef<AbortController | null>(null);
   const videoTrainingCapability = useMemo(() => getVideoTrainingCapability(), []);
   const videoKeyframesAvailable = videoThumbnailsRef.current !== null;
@@ -706,8 +770,10 @@ export default function PropertyTrainingScreen() {
   }, []);
 
   const handleRemoveCapture = useCallback((id: string) => {
-    // Clear cached upload ID so it doesn't get sent to training if removed
+    // Clear cached upload ID and background upload tracking
     uploadedIdsRef.current.delete(id);
+    uploadQueueRef.current.delete(id);
+    setUploadStatuses((prev) => { const next = new Map(prev); next.delete(id); return next; });
     setCaptures((prev) => {
       const capture = prev.find((item) => item.id === id);
       if (capture) {
@@ -871,12 +937,15 @@ export default function PropertyTrainingScreen() {
   const handleCancelProcessing = useCallback(() => {
     if (phase !== "uploading" && phase !== "training") return;
     cancelRequestedRef.current = true;
+    uploadCancelledRef.current = true;
     runIdRef.current++;
     // Abort the in-flight training HTTP request so the server stops processing
     trainingAbortRef.current?.abort();
     trainingAbortRef.current = null;
     setError("Upload/training canceled.");
     setPhase("capturing");
+    // Allow background uploads to resume for new captures
+    setTimeout(() => { uploadCancelledRef.current = false; }, 500);
   }, [phase]);
 
   const handleUploadAndTrain = useCallback(async () => {
@@ -1660,6 +1729,26 @@ export default function PropertyTrainingScreen() {
                       <Text style={styles.videoIndicatorText}>VID</Text>
                     </View>
                   )}
+                  {/* Upload status indicator for photos */}
+                  {item.type === "photo" && (() => {
+                    const status = uploadStatuses.get(item.id);
+                    if (status === "uploaded") return (
+                      <View style={styles.uploadStatusBadge}>
+                        <Text style={styles.uploadStatusText}>✓</Text>
+                      </View>
+                    );
+                    if (status === "uploading") return (
+                      <View style={[styles.uploadStatusBadge, { backgroundColor: "rgba(59,130,246,0.85)" }]}>
+                        <Text style={styles.uploadStatusText}>↑</Text>
+                      </View>
+                    );
+                    if (status === "failed") return (
+                      <View style={[styles.uploadStatusBadge, { backgroundColor: "rgba(239,68,68,0.85)" }]}>
+                        <Text style={styles.uploadStatusText}>!</Text>
+                      </View>
+                    );
+                    return null;
+                  })()}
                 </TouchableOpacity>
                 {/* Visible X delete button */}
                 <TouchableOpacity
@@ -2571,6 +2660,22 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.65)",
     justifyContent: "center",
     alignItems: "center",
+  },
+  uploadStatusBadge: {
+    position: "absolute",
+    bottom: 2,
+    right: 2,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: "rgba(34,197,94,0.85)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  uploadStatusText: {
+    color: "#fff",
+    fontSize: 9,
+    fontWeight: "700",
   },
   videoIndicatorText: {
     color: "#fff",
