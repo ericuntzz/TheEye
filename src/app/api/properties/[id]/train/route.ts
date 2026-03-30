@@ -609,7 +609,10 @@ export async function POST(
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { mediaUploadIds } = body;
+  const { mediaUploadIds, previewAnalysis } = body as {
+    mediaUploadIds: unknown;
+    previewAnalysis?: { rooms: Array<{ name: string; keyItems: string[] }> };
+  };
 
   if (
     !mediaUploadIds ||
@@ -735,7 +738,11 @@ export async function POST(
     }
 
     // Analyze images with Claude Vision API directly
-    const rawAnalysis = await analyzePropertyImages(imageUrls, property.name);
+    // Pass preview context if available — Claude verifies/merges instead of starting from scratch
+    const previewContext = previewAnalysis && Array.isArray(previewAnalysis.rooms)
+      ? { rooms: previewAnalysis.rooms.filter(r => typeof r.name === "string" && r.name.length > 0) }
+      : undefined;
+    const rawAnalysis = await analyzePropertyImages(imageUrls, property.name, previewContext);
     const analysis = normalizeAnalysis(rawAnalysis, imageUrls);
 
     // Clean up existing rooms/baselines/versions from previous training
@@ -1344,6 +1351,7 @@ export async function POST(
 async function analyzePropertyImages(
   imageUrls: string[],
   propertyName: string,
+  previewContext?: { rooms: Array<{ name: string; keyItems: string[] }> },
 ): Promise<PropertyAnalysis> {
   const anthropicKey = process.env.CLAUDE_API_KEY;
 
@@ -1402,7 +1410,11 @@ async function analyzePropertyImages(
             content: [
               {
                 type: "text",
-                text: `You are analyzing photos of a luxury property called "${propertyName}". Identify each distinct room shown and all notable items/furniture/decor in each room.
+                text: `You are analyzing photos of a luxury property called "${propertyName}". Identify each distinct room shown and all notable items/furniture/decor in each room.${
+  previewContext && previewContext.rooms.length > 0
+    ? `\n\nIMPORTANT: A preliminary analysis has already identified these rooms: ${previewContext.rooms.map(r => `${r.name} (items: ${r.keyItems.join(", ")})`).join("; ")}. Use these room names when they match what you see. Verify and refine the assignments — add any rooms or items the preview missed, merge duplicates, and correct any misidentifications.`
+    : ""
+}
 
 Return ONLY valid JSON (no other text) with this structure:
 {

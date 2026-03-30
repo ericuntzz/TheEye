@@ -47,6 +47,7 @@ import {
   uploadImageFile,
   uploadVideoFile,
   trainProperty,
+  trainPreview,
   ApiError,
 } from "../lib/api";
 import { colors } from "../lib/tokens";
@@ -213,6 +214,17 @@ export default function PropertyTrainingScreen() {
   const uploadCancelledRef = useRef(false);
   const uploadPromisesRef = useRef<Map<string, Promise<string[]>>>(new Map());
 
+  // ── Progressive Analysis State ──
+  // As photos upload, we periodically call the preview endpoint to identify rooms/items
+  // in real-time. This gives the user immediate feedback during capture.
+  const [discoveredRooms, setDiscoveredRooms] = useState<
+    Array<{ name: string; imageCount: number; keyItems: string[] }>
+  >([]);
+  const [discoveredItemCount, setDiscoveredItemCount] = useState(0);
+  const [previewMessage, setPreviewMessage] = useState<string | null>(null);
+  const lastPreviewCountRef = useRef(0); // Track how many uploads triggered the last preview
+  const previewInFlightRef = useRef(false);
+
   const resetBackgroundUploadState = useCallback(() => {
     uploadCancelledRef.current = true;
     uploadQueueRef.current.clear();
@@ -255,6 +267,8 @@ export default function PropertyTrainingScreen() {
           uploadedIdsRef.current.set(capture.id, uploadedIds);
           uploadQueueRef.current.delete(capture.id);
           setUploadStatuses((prev) => new Map(prev).set(capture.id, "uploaded"));
+          // Check if we should trigger a progressive preview
+          void triggerProgressivePreview();
         } catch (err) {
           if (!uploadCancelledRef.current && capturesRef.current.some((item) => item.id === capture.id)) {
             console.warn("[BackgroundUpload] Failed for capture", capture.id, err);
@@ -268,6 +282,44 @@ export default function PropertyTrainingScreen() {
       uploadActiveRef.current = false;
     }
   }, [propertyId]);
+
+  // Progressive preview: after every 5 new uploads, run a quick AI analysis
+  const triggerProgressivePreview = useCallback(async () => {
+    if (previewInFlightRef.current || uploadCancelledRef.current) return;
+
+    // Count how many photos are successfully uploaded
+    const uploadedCount = Array.from(uploadedIdsRef.current.values()).filter(ids => ids.length > 0).length;
+    const newSinceLastPreview = uploadedCount - lastPreviewCountRef.current;
+
+    // Trigger preview every 5 uploads (or on the first 3 for quick early feedback)
+    const threshold = lastPreviewCountRef.current === 0 ? 3 : 5;
+    if (newSinceLastPreview < threshold) return;
+
+    previewInFlightRef.current = true;
+    lastPreviewCountRef.current = uploadedCount;
+
+    try {
+      // Collect all uploaded media IDs
+      const allUploadIds: string[] = [];
+      for (const ids of uploadedIdsRef.current.values()) {
+        allUploadIds.push(...ids);
+      }
+      if (allUploadIds.length === 0) return;
+
+      const previousRoomNames = discoveredRooms.map(r => r.name);
+      const result = await trainPreview(propertyId, allUploadIds, previousRoomNames);
+
+      if (!uploadCancelledRef.current && result.rooms) {
+        setDiscoveredRooms(result.rooms);
+        setDiscoveredItemCount(result.itemCount);
+        setPreviewMessage(result.message);
+      }
+    } catch (err) {
+      console.warn("[ProgressivePreview] Preview failed:", err);
+    } finally {
+      previewInFlightRef.current = false;
+    }
+  }, [propertyId, discoveredRooms]);
 
   // Trigger background upload when new photo captures are added
   useEffect(() => {
@@ -961,16 +1013,14 @@ export default function PropertyTrainingScreen() {
   const handleCancelProcessing = useCallback(() => {
     if (phase !== "uploading" && phase !== "training") return;
     cancelRequestedRef.current = true;
-    uploadCancelledRef.current = true;
+    resetBackgroundUploadState();
     runIdRef.current++;
     // Abort the in-flight training HTTP request so the server stops processing
     trainingAbortRef.current?.abort();
     trainingAbortRef.current = null;
     setError("Upload/training canceled.");
     setPhase("capturing");
-    // Allow background uploads to resume for new captures
-    setTimeout(() => { uploadCancelledRef.current = false; }, 500);
-  }, [phase]);
+  }, [phase, resetBackgroundUploadState]);
 
   const handleUploadAndTrain = useCallback(async () => {
     const currentRunId = Date.now();
@@ -1102,6 +1152,7 @@ export default function PropertyTrainingScreen() {
       trainingAbortRef.current = abortController;
       const result = await trainProperty(propertyId, mediaUploadIds, {
         signal: abortController.signal,
+        previewAnalysis: discoveredRooms.length > 0 ? { rooms: discoveredRooms } : undefined,
       });
       trainingAbortRef.current = null;
       if (!isRunActive(currentRunId)) {
@@ -1717,6 +1768,23 @@ export default function PropertyTrainingScreen() {
                 ? `Capture ${3 - captures.length} more item${3 - captures.length !== 1 ? "s" : ""} (minimum)`
                 : "Keep capturing or tap Done when finished"}
           </Text>
+        </View>
+      )}
+
+      {/* Progressive analysis feedback — shows discovered rooms in real-time */}
+      {discoveredRooms.length > 0 && !isRecording && (
+        <View style={styles.discoveryBanner} pointerEvents="none">
+          <Text style={styles.discoveryTitle}>
+            AI found {discoveredRooms.length} room{discoveredRooms.length !== 1 ? "s" : ""}
+          </Text>
+          <Text style={styles.discoveryRooms} numberOfLines={2}>
+            {discoveredRooms.map(r => r.name).join(" · ")}
+          </Text>
+          {discoveredItemCount > 0 && (
+            <Text style={styles.discoveryItems}>
+              {discoveredItemCount} items identified
+            </Text>
+          )}
         </View>
       )}
 
@@ -2624,6 +2692,40 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.08)",
+  },
+
+  // ── Progressive Discovery Banner ──
+  discoveryBanner: {
+    position: "absolute",
+    bottom: "22%",
+    left: 16,
+    right: 16,
+    backgroundColor: "rgba(2, 6, 23, 0.75)",
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    zIndex: 5,
+    borderWidth: 1,
+    borderColor: "rgba(35, 114, 184, 0.3)",
+  },
+  discoveryTitle: {
+    color: "#2372B8",
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+    marginBottom: 3,
+  },
+  discoveryRooms: {
+    color: "rgba(255,255,255,0.9)",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  discoveryItems: {
+    color: "rgba(255,255,255,0.5)",
+    fontSize: 11,
+    fontWeight: "500",
+    marginTop: 2,
   },
 
   // ── Zoom Indicator ──

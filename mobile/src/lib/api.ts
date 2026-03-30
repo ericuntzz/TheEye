@@ -518,14 +518,43 @@ export async function deleteInspectionFinding(
 export async function trainProperty(
   propertyId: string,
   mediaUploadIds: string[],
-  options?: { signal?: AbortSignal },
+  options?: {
+    signal?: AbortSignal;
+    previewAnalysis?: { rooms: Array<{ name: string; keyItems: string[] }> };
+  },
 ) {
+  const json: Record<string, unknown> = { mediaUploadIds };
+  if (options?.previewAnalysis) {
+    json.previewAnalysis = options.previewAnalysis;
+  }
   const res = await authFetch(`/api/properties/${propertyId}/train`, {
     method: "POST",
-    json: { mediaUploadIds },
-    timeoutMs: 180_000, // 3 min — training calls Claude Vision + creates rooms/items/baselines
-    noRetry: true, // Don't retry training — server may already be processing
+    json,
+    timeoutMs: 180_000,
+    noRetry: true,
     signal: options?.signal,
+  });
+  return res.json();
+}
+
+/**
+ * Progressive training preview — sends a batch of uploaded images for quick
+ * room/item identification during the capture phase. Non-blocking, fire-and-forget.
+ */
+export async function trainPreview(
+  propertyId: string,
+  mediaUploadIds: string[],
+  previousRooms: string[] = [],
+): Promise<{
+  rooms: Array<{ name: string; imageCount: number; keyItems: string[] }>;
+  itemCount: number;
+  message: string;
+}> {
+  const res = await authFetch(`/api/properties/${propertyId}/train/preview`, {
+    method: "POST",
+    json: { mediaUploadIds, previousRooms },
+    timeoutMs: 35_000, // 35s — lightweight analysis
+    noRetry: true,
   });
   return res.json();
 }
