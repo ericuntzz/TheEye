@@ -16,6 +16,7 @@ interface Props {
   findings: Finding[];
   onConfirm: (id: string) => void;
   onDismiss: (id: string, reason?: DismissReason) => void;
+  bottomInset?: number;
 }
 
 // Smaller initial snap so bottom controls remain accessible. User can swipe up to review.
@@ -59,6 +60,7 @@ export default function FindingsPanel({
   findings,
   onConfirm,
   onDismiss,
+  bottomInset = 0,
 }: Props) {
   const processingRef = useRef<Set<string>>(new Set());
   const [sheetIndex, setSheetIndex] = useState(0);
@@ -140,6 +142,7 @@ export default function FindingsPanel({
   if (findings.length === 0 || dismissed) return null;
 
   const expanded = sheetIndex >= SNAP_POINTS.length - 1;
+  const showHelperText = sheetIndex > 0;
 
   return (
     <BottomSheet
@@ -147,11 +150,16 @@ export default function FindingsPanel({
       index={0}
       snapPoints={SNAP_POINTS}
       topInset={24}
+      bottomInset={bottomInset}
+      detached={bottomInset > 0}
       enablePanDownToClose={true}
       onClose={() => setDismissed(true)}
-      backgroundStyle={styles.sheetBackground}
+      backgroundStyle={[
+        styles.sheetBackground,
+        bottomInset > 0 && styles.sheetBackgroundDetached,
+      ]}
       handleIndicatorStyle={styles.handleIndicator}
-      style={styles.sheet}
+      style={[styles.sheet, bottomInset > 0 && styles.sheetDetached]}
       onChange={(index) => setSheetIndex(index)}
     >
       <BottomSheetView style={styles.content}>
@@ -164,9 +172,11 @@ export default function FindingsPanel({
           </Text>
         </View>
 
-        <Text style={styles.helperText}>
-          AI confidence shows how certain the model is, not how severe the issue is.
-        </Text>
+        {showHelperText ? (
+          <Text style={styles.helperText}>
+            AI confidence shows how certain the model is, not how severe the issue is.
+          </Text>
+        ) : null}
 
         <BottomSheetScrollView
           showsVerticalScrollIndicator={false}
@@ -257,6 +267,9 @@ const styles = StyleSheet.create({
   sheet: {
     zIndex: 20,
   },
+  sheetDetached: {
+    marginHorizontal: 12,
+  },
   sheetBackground: {
     backgroundColor: "rgba(10, 14, 23, 0.97)",
     borderTopLeftRadius: 26,
@@ -264,6 +277,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderBottomWidth: 0,
     borderColor: "rgba(148, 163, 184, 0.08)",
+  },
+  sheetBackgroundDetached: {
+    borderBottomLeftRadius: 26,
+    borderBottomRightRadius: 26,
   },
   handleIndicator: {
     backgroundColor: "rgba(148, 163, 184, 0.35)",
@@ -366,6 +383,8 @@ const styles = StyleSheet.create({
     flex: 1,
     borderRadius: 12,
     paddingVertical: 12,
+    minHeight: 44,
+    justifyContent: "center",
     alignItems: "center",
     borderWidth: 1,
   },

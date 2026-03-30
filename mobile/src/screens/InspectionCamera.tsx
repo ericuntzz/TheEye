@@ -3630,7 +3630,9 @@ export default function InspectionCameraScreen() {
         >
           {bottomPrompt && (
             <View style={styles.captureHintBubble}>
-              <Text style={styles.captureHintText}>{bottomPrompt}</Text>
+              <Text style={styles.captureHintText} numberOfLines={2}>
+                {bottomPrompt}
+              </Text>
             </View>
           )}
 
