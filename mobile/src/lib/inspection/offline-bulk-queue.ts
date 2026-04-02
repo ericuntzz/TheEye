@@ -55,24 +55,12 @@ async function readQueue(): Promise<PendingBulkSubmission[]> {
 
 async function writeQueue(queue: PendingBulkSubmission[]): Promise<void> {
   const file = getQueueFile();
-  // Atomic write: write to temp file in the same directory, then rename.
-  // tmpFile must be in the same directory as `file` (Paths.document) so that
-  // the move is a same-directory rename — cross-directory moves with
-  // expo-file-system treat the File destination as a directory and keep the
-  // original filename, causing "item with the same name already exists" on
-  // the second write.
-  const tmpFile = new File(Paths.document, `${QUEUE_FILE_NAME}.tmp`);
-  try {
-    if (tmpFile.exists) tmpFile.delete(); // Remove any leftover tmp
-    tmpFile.create({ intermediates: true, overwrite: true });
-    tmpFile.write(JSON.stringify(queue));
-    if (file.exists) file.delete(); // iOS requires no existing target for move
-    tmpFile.move(file);
-  } catch (err) {
-    // Clean up temp file on failure
-    try { if (tmpFile.exists) tmpFile.delete(); } catch { /* ignore */ }
-    throw err;
-  }
+  // withQueueLock serializes all writes, so direct overwrite is safe.
+  // The tmp-file-move pattern caused "item with same name already exists"
+  // because File.move(File) treats the destination as a directory and keeps
+  // the original filename, so the .tmp file never actually got renamed.
+  file.create({ overwrite: true });
+  file.write(JSON.stringify(queue));
 }
 
 export function enqueueBulkSubmission(params: {
