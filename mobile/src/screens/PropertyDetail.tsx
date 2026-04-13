@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useRef } from "react";
 import {
   View,
   Text,
@@ -107,9 +107,17 @@ export default function PropertyDetailScreen() {
     }
   }, [propertyId]);
 
+  const hasChangesRef = useRef(false);
+  // Keep ref in sync so the focus callback captures current value
+  hasChangesRef.current = hasChanges;
+
   useFocusEffect(
     useCallback(() => {
-      loadProperty();
+      // Skip refetch if the user has pending edits — prevents
+      // stale server data from overwriting local form state.
+      if (!hasChangesRef.current) {
+        loadProperty();
+      }
     }, [loadProperty]),
   );
 
@@ -291,6 +299,7 @@ export default function PropertyDetailScreen() {
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
         >
           {/* Title + status */}
           <View style={styles.titleRow}>
@@ -384,7 +393,7 @@ export default function PropertyDetailScreen() {
               <Text style={styles.label}>Property Type</Text>
               <ScrollView
                 horizontal
-                showsHorizontalScrollIndicator={false}
+                showsHorizontalScrollIndicator
                 contentContainerStyle={styles.typeRow}
               >
                 {PROPERTY_TYPES.map((t) => {
@@ -1008,7 +1017,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(15, 23, 42, 0.45)",
   },
   detailsModalSheet: {
-    maxHeight: "88%",
+    height: "88%",
     backgroundColor: colors.background,
     borderTopLeftRadius: radius.xl,
     borderTopRightRadius: radius.xl,
