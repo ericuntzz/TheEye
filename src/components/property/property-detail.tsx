@@ -43,6 +43,9 @@ import {
 } from "@/components/ui/dialog";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { SupplyCatalog } from "./supply-catalog";
+import { RestockOrders } from "./restock-orders";
+import VendorContacts from "./vendor-contacts";
 
 interface Property {
   id: string;
@@ -231,7 +234,7 @@ export function PropertyDetail({
             {error || "This property may have been removed or the link is invalid."}
           </p>
           <Link href="/dashboard">
-            <Button variant="outline" className="gap-2 rounded-xl">
+            <Button variant="outline" className="gap-2">
               <ArrowLeft className="h-4 w-4" /> Back to Properties
             </Button>
           </Link>
@@ -263,7 +266,7 @@ export function PropertyDetail({
           )}
           {/* Mobile action buttons */}
           <div className="grid grid-cols-2 gap-2 mt-4">
-            <Button variant="outline" size="sm" onClick={openEditDialog} className="gap-1.5 rounded-xl h-10">
+            <Button variant="outline" onClick={openEditDialog} className="gap-1.5">
               <Pencil className="h-4 w-4" />
               Edit
             </Button>
@@ -271,7 +274,7 @@ export function PropertyDetail({
               variant="outline"
               size="sm"
               onClick={() => setDeleteDialogOpen(true)}
-              className="gap-1.5 rounded-xl h-10 text-destructive hover:text-destructive hover:bg-destructive/5 border-destructive/20"
+              className="gap-1.5 text-destructive hover:text-destructive hover:bg-destructive/5 border-destructive/20"
             >
               <Trash2 className="h-4 w-4" />
               Delete
@@ -280,7 +283,7 @@ export function PropertyDetail({
               variant="outline"
               size="sm"
               onClick={() => openMobileAppPrompt("training")}
-              className="gap-1.5 rounded-xl h-10"
+              className="gap-1.5"
             >
               <Smartphone className="h-4 w-4" />
               {property.trainingStatus === "trained" ? "Retrain in iPhone App" : "Train in iPhone App"}
@@ -289,7 +292,7 @@ export function PropertyDetail({
               <Button
                 size="sm"
                 onClick={() => openMobileAppPrompt("inspection")}
-                className="gap-1.5 rounded-xl h-10"
+                className="gap-1.5"
               >
                 <Smartphone className="h-4 w-4" />
                 Inspect in iPhone App
@@ -423,7 +426,7 @@ export function PropertyDetail({
                 The web app handles accounts, properties, and history. Baseline capture and walkthrough inspections currently live in the iPhone app.
               </p>
             </div>
-            <Button onClick={() => openMobileAppPrompt("training")} size="sm" className="gap-2 shrink-0 rounded-xl">
+            <Button onClick={() => openMobileAppPrompt("training")} size="sm" className="gap-2 shrink-0">
               <Smartphone className="h-4 w-4" />
               Open iPhone App
             </Button>
@@ -522,6 +525,18 @@ export function PropertyDetail({
             </p>
           </div>
         ) : null}
+
+        {/* Supply Catalog */}
+        <SupplyCatalog
+          propertyId={property.id}
+          rooms={rooms.map((r) => ({ id: r.id, name: r.name }))}
+        />
+
+        {/* Restock Orders */}
+        <RestockOrders propertyId={property.id} />
+
+        {/* Vendor Contacts */}
+        <VendorContacts propertyId={property.id} />
       </div>
 
       {/* Edit Property Dialog */}

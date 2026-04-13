@@ -1,10 +1,13 @@
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import { Alert, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import BottomSheet, {
   BottomSheetScrollView,
   BottomSheetView,
 } from "@gorhom/bottom-sheet";
+import { Ionicons } from "@expo/vector-icons";
 import type { Finding } from "../lib/inspection/types";
+import { getActionConfig as getSharedActionConfig } from "../lib/inspection/action-map";
+import { colors, radius, fontSize, spacing } from "../lib/tokens";
 
 export type DismissReason =
   | "not_accurate"
@@ -23,11 +26,11 @@ interface Props {
 const SNAP_POINTS = ["12%", "45%", "85%"];
 
 const SEVERITY_COLORS: Record<string, string> = {
-  cosmetic: "#64748b",
-  maintenance: "#eab308",
-  safety: "#4DA6FF",
-  urgent_repair: "#ef4444",
-  guest_damage: "#a855f7",
+  cosmetic: colors.severity.cosmetic,
+  maintenance: colors.severity.maintenance,
+  safety: colors.severity.safety,
+  urgent_repair: colors.severity.urgentRepair,
+  guest_damage: colors.severity.guestDamage,
 };
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -44,17 +47,42 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 
 const CATEGORY_COLORS: Record<string, string> = {
-  missing: "#f97316",
-  moved: "#eab308",
-  cleanliness: "#06b6d4",
-  damage: "#ef4444",
-  inventory: "#a855f7",
-  operational: "#3b82f6",
-  safety: "#ef4444",
-  restock: "#22c55e",
-  presentation: "#64748b",
-  manual_note: "#4DA6FF",
+  missing: colors.category.missing,
+  moved: colors.category.moved,
+  cleanliness: colors.category.cleanliness,
+  damage: colors.category.damage,
+  inventory: colors.category.inventory,
+  operational: colors.category.operational,
+  safety: colors.category.safety,
+  restock: colors.category.restock,
+  presentation: colors.category.presentation,
+  manual_note: colors.category.manualNote,
 };
+
+/* ------------------------------------------------------------------ */
+/*  Action button config — delegates to shared action-map.ts          */
+/* ------------------------------------------------------------------ */
+
+interface PanelActionConfig {
+  label: string;
+  routeHint: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  color: string;
+  bgColor: string;
+  borderColor: string;
+}
+
+function getActionConfig(finding: Finding): PanelActionConfig {
+  const shared = getSharedActionConfig(finding);
+  return {
+    label: shared.label,
+    routeHint: shared.actionLabel === "→ Noted" ? "" : shared.actionLabel,
+    icon: shared.icon as keyof typeof Ionicons.glyphMap,
+    color: shared.color,
+    bgColor: shared.bgColor,
+    borderColor: shared.borderColor,
+  };
+}
 
 export default function FindingsPanel({
   findings,
@@ -183,8 +211,9 @@ export default function FindingsPanel({
           contentContainerStyle={styles.listContent}
         >
           {findings.map((finding) => {
-            const categoryColor = CATEGORY_COLORS[finding.category] || "#64748b";
-            const severityColor = SEVERITY_COLORS[finding.severity] || "#64748b";
+            const categoryColor = CATEGORY_COLORS[finding.category] || colors.slate500;
+            const severityColor = SEVERITY_COLORS[finding.severity] || colors.slate500;
+            const action = getActionConfig(finding);
 
             return (
               <View key={finding.id} style={styles.findingCard}>
@@ -229,17 +258,45 @@ export default function FindingsPanel({
                   {finding.description}
                 </Text>
 
+                {/* Action route hint */}
+                {action.routeHint !== "" && (
+                  <Text style={[styles.routeHint, { color: action.color }]}>
+                    {action.routeHint}
+                  </Text>
+                )}
+
                 <View style={styles.actions}>
                   <TouchableOpacity
-                    style={[styles.actionButton, styles.confirmButton]}
+                    style={[
+                      styles.actionButton,
+                      styles.confirmButton,
+                      {
+                        backgroundColor: action.bgColor,
+                        borderColor: action.borderColor,
+                      },
+                    ]}
                     onPress={() => handleConfirm(finding.id)}
                     activeOpacity={0.7}
                     accessibilityRole="button"
-                    accessibilityLabel={`Confirm finding: ${finding.description}`}
+                    accessibilityLabel={`${action.label}: ${finding.description}`}
                   >
-                    <Text style={[styles.actionText, styles.confirmText]}>
-                      Confirm
-                    </Text>
+                    <View style={styles.confirmInner}>
+                      <Ionicons
+                        name={action.icon}
+                        size={16}
+                        color={action.color}
+                        style={styles.confirmIcon}
+                      />
+                      <Text
+                        style={[
+                          styles.actionText,
+                          styles.confirmText,
+                          { color: action.color },
+                        ]}
+                      >
+                        {action.label}
+                      </Text>
+                    </View>
                   </TouchableOpacity>
 
                   <TouchableOpacity
@@ -268,142 +325,157 @@ const styles = StyleSheet.create({
     zIndex: 20,
   },
   sheetDetached: {
-    marginHorizontal: 12,
+    marginHorizontal: spacing.content,
   },
   sheetBackground: {
-    backgroundColor: "rgba(10, 14, 23, 0.97)",
+    backgroundColor: colors.camera.sheetBg,
     borderTopLeftRadius: 26,
     borderTopRightRadius: 26,
     borderWidth: 1,
     borderBottomWidth: 0,
-    borderColor: "rgba(148, 163, 184, 0.08)",
+    borderColor: colors.camera.border,
   },
   sheetBackgroundDetached: {
     borderBottomLeftRadius: 26,
     borderBottomRightRadius: 26,
   },
   handleIndicator: {
-    backgroundColor: "rgba(148, 163, 184, 0.35)",
+    backgroundColor: colors.camera.textSubtle,
     width: 40,
     height: 4,
   },
   content: {
     flex: 1,
-    paddingHorizontal: 16,
-    paddingBottom: 28,
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.section,
   },
   headerRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    gap: 12,
+    gap: spacing.content,
   },
   header: {
-    color: "#2372B8",
-    fontSize: 15,
+    color: colors.primary,
+    fontSize: fontSize.body,
     fontWeight: "700",
     letterSpacing: 0.2,
   },
   expandHint: {
-    color: "rgba(148, 163, 184, 0.72)",
-    fontSize: 11,
+    color: colors.camera.textSubtle,
+    fontSize: fontSize.micro,
     fontWeight: "600",
   },
   helperText: {
-    color: "rgba(203, 213, 225, 0.72)",
-    fontSize: 12,
+    color: colors.camera.textSubtle,
+    fontSize: fontSize.caption,
     lineHeight: 18,
-    marginTop: 8,
-    marginBottom: 12,
+    marginTop: spacing.sm,
+    marginBottom: spacing.content,
   },
   listContent: {
-    paddingBottom: 24,
-    gap: 10,
+    paddingBottom: spacing.lg,
+    gap: spacing.element,
   },
   findingCard: {
-    backgroundColor: "rgba(27, 42, 74, 0.88)",
-    borderRadius: 14,
-    padding: 14,
+    backgroundColor: colors.camera.overlayCardLight,
+    borderRadius: radius.xl,
+    padding: spacing.card,
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
+    borderColor: colors.camera.borderSubtle,
   },
   findingHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    gap: 12,
-    marginBottom: 8,
+    gap: spacing.content,
+    marginBottom: spacing.sm,
   },
   findingLabelRow: {
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
     flexWrap: "wrap",
-    gap: 6,
+    gap: spacing.tight,
   },
   categoryDot: {
     width: 8,
     height: 8,
-    borderRadius: 4,
+    borderRadius: radius.full,
   },
   categoryText: {
-    fontSize: 12,
+    fontSize: fontSize.caption,
     fontWeight: "700",
     letterSpacing: 0.35,
     textTransform: "uppercase",
   },
   severityPill: {
-    borderRadius: 999,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    borderRadius: radius.full,
+    paddingHorizontal: spacing.tight,
+    paddingVertical: spacing.xxs,
   },
   severityPillText: {
-    color: "#fff",
-    fontSize: 11,
+    color: colors.camera.text,
+    fontSize: fontSize.micro,
     fontWeight: "700",
     letterSpacing: 0.4,
   },
   confidenceText: {
-    color: "rgba(148, 163, 184, 0.82)",
-    fontSize: 11,
+    color: colors.camera.textSubtle,
+    fontSize: fontSize.micro,
     fontWeight: "600",
   },
   findingDescription: {
-    color: "#e2e8f0",
-    fontSize: 15,
+    color: colors.camera.textBody,
+    fontSize: fontSize.body,
     lineHeight: 22,
-    marginBottom: 14,
+    marginBottom: spacing.element,
     fontWeight: "500",
+  },
+  routeHint: {
+    fontSize: fontSize.micro,
+    fontWeight: "600",
+    letterSpacing: 0.3,
+    marginBottom: spacing.sm,
+    opacity: 0.72,
   },
   actions: {
     flexDirection: "row",
-    gap: 10,
+    gap: spacing.element,
   },
   actionButton: {
     flex: 1,
-    borderRadius: 12,
-    paddingVertical: 12,
+    borderRadius: radius.lg,
+    paddingVertical: spacing.content,
     minHeight: 44,
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 1,
   },
   confirmButton: {
-    backgroundColor: "rgba(34, 197, 94, 0.08)",
-    borderColor: "rgba(34, 197, 94, 0.18)",
+    // Base colors overridden inline per action config
+  },
+  confirmInner: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.tight,
+  },
+  confirmIcon: {
+    marginTop: 1,
   },
   dismissButton: {
-    backgroundColor: "rgba(239, 68, 68, 0.08)",
-    borderColor: "rgba(239, 68, 68, 0.18)",
+    backgroundColor: colors.errorBg,
+    borderColor: colors.errorBorder,
   },
   actionText: {
-    fontSize: 14,
+    fontSize: fontSize.label,
     fontWeight: "700",
   },
   confirmText: {
-    color: "#22c55e",
+    // Color set inline per action config
   },
   dismissText: {
-    color: "#ef4444",
+    color: colors.severity.urgentRepair,
   },
 });

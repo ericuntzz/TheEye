@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, Modal } from "react-native";
 import { Image } from "expo-image";
+import { colors, radius, fontSize, spacing } from "../lib/tokens";
 
 type WaypointState = "pending" | "captured" | "analyzing" | "issue_found";
 
@@ -35,10 +36,10 @@ export default function CoverageTracker({
   const clampedCoverage = Math.min(100, Math.max(0, coverage));
   const barColor =
     clampedCoverage >= 90
-      ? "#22c55e"
+      ? colors.category.restock
       : clampedCoverage >= 50
-        ? "#4DA6FF"
-        : "#94a3b8";
+        ? colors.severity.safety
+        : colors.slate300;
 
   const scannedCount =
     typeof roomScannedCount === "number"
@@ -235,52 +236,52 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     flexDirection: "column",
-    backgroundColor: "rgba(2, 6, 23, 0.72)",
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    gap: 8,
+    backgroundColor: colors.camera.panelBg,
+    borderRadius: radius.xl,
+    paddingHorizontal: spacing.card,
+    paddingVertical: spacing.element,
+    gap: spacing.sm,
     borderWidth: 1,
-    borderColor: "rgba(148,163,184,0.16)",
+    borderColor: colors.camera.panelBorder,
   },
   headerRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: 12,
+    gap: spacing.content,
   },
   headerText: {
-    color: "rgba(255,255,255,0.94)",
-    fontSize: 13,
+    color: colors.camera.textBright,
+    fontSize: fontSize.sm,
     fontWeight: "600",
     flex: 1,
   },
   barBackground: {
     width: "100%",
     height: 6,
-    backgroundColor: "rgba(255,255,255,0.12)",
-    borderRadius: 4,
+    backgroundColor: colors.camera.borderLight,
+    borderRadius: radius.xs,
     overflow: "hidden",
   },
   barFill: {
     height: "100%",
-    borderRadius: 4,
+    borderRadius: radius.xs,
   },
   percentText: {
-    fontSize: 11,
+    fontSize: fontSize.micro,
     fontWeight: "600",
     minWidth: 0,
     textAlign: "right",
   },
   roomProgressText: {
-    color: "rgba(226,232,240,0.75)",
-    fontSize: 11,
+    color: colors.camera.textBodyMuted,
+    fontSize: fontSize.micro,
     fontWeight: "500",
     lineHeight: 15,
   },
   sectionLabel: {
-    color: "rgba(191,219,254,0.78)",
-    fontSize: 10,
+    color: colors.camera.textAccent,
+    fontSize: fontSize.badge,
     fontWeight: "700",
     letterSpacing: 0.8,
     textTransform: "uppercase",
@@ -288,74 +289,74 @@ const styles = StyleSheet.create({
   waypointsRow: {
     flexDirection: "row",
     alignItems: "flex-start",
-    gap: 10,
+    gap: spacing.element,
     flexWrap: "wrap",
-    paddingTop: 2,
+    paddingTop: spacing.xxs,
   },
   waypointItem: {
     flexDirection: "row",
     alignItems: "flex-start",
-    gap: 6,
+    gap: spacing.tight,
     maxWidth: "48%",
     minWidth: "48%",
-    backgroundColor: "rgba(15,23,42,0.55)",
-    borderRadius: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
+    backgroundColor: colors.camera.itemBg,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.tight,
     borderWidth: 1,
-    borderColor: "rgba(148,163,184,0.12)",
+    borderColor: colors.camera.itemBorder,
   },
   dot: {
     width: 7,
     height: 7,
-    borderRadius: 4,
-    marginTop: 4,
+    borderRadius: radius.full,
+    marginTop: spacing.xs,
   },
   dotScanned: {
-    backgroundColor: "#22c55e", // green — captured + verified
+    backgroundColor: colors.category.restock,
   },
   dotAnalyzing: {
-    backgroundColor: "#3b82f6", // blue — captured, AI still processing
+    backgroundColor: colors.category.operational,
   },
   dotIssue: {
-    backgroundColor: "#f59e0b", // amber — issue found by AI
+    backgroundColor: colors.warning,
   },
   dotPending: {
-    backgroundColor: "rgba(255,255,255,0.62)",
+    backgroundColor: colors.camera.dotPending,
   },
   dotLabel: {
-    color: "rgba(255,255,255,0.84)",
-    fontSize: 11,
+    color: colors.camera.textMedium,
+    fontSize: fontSize.micro,
     fontWeight: "500",
     flexShrink: 1,
   },
   dotLabelScanned: {
-    color: "rgba(34,197,94,0.7)",
+    color: colors.camera.dotScannedLabel,
   },
   moreRemainingPill: {
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    backgroundColor: "rgba(148,163,184,0.16)",
+    borderRadius: radius.full,
+    paddingHorizontal: spacing.element,
+    paddingVertical: spacing.tight,
+    backgroundColor: colors.camera.pillBg,
     borderWidth: 1,
-    borderColor: "rgba(148,163,184,0.22)",
+    borderColor: colors.camera.pillBorder,
     alignSelf: "flex-start",
   },
   moreRemainingText: {
-    color: "rgba(255,255,255,0.78)",
-    fontSize: 10,
+    color: colors.camera.textMedium,
+    fontSize: fontSize.badge,
     fontWeight: "600",
   },
   capturedSummaryRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    paddingTop: 2,
+    gap: spacing.sm,
+    paddingTop: spacing.xxs,
     flexWrap: "wrap",
   },
   capturedSummaryText: {
-    color: "rgba(134,239,172,0.82)",
-    fontSize: 10,
+    color: colors.camera.textSuccess,
+    fontSize: fontSize.badge,
     fontWeight: "700",
     letterSpacing: 0.8,
     textTransform: "uppercase",
@@ -363,77 +364,77 @@ const styles = StyleSheet.create({
   capturedDotsRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: spacing.tight,
     flexWrap: "wrap",
     flexShrink: 1,
   },
   lastAngleRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    paddingTop: 2,
+    gap: spacing.element,
+    paddingTop: spacing.xxs,
   },
   lastAnglePreview: {
     width: 56,
     height: 56,
-    borderRadius: 8,
+    borderRadius: radius.sm,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.2)",
+    borderColor: colors.camera.borderPreview,
   },
   lastAngleTextCol: {
     flex: 1,
-    gap: 2,
+    gap: spacing.xxs,
   },
   lastAngleLabel: {
-    color: "rgba(255,255,255,0.92)",
-    fontSize: 13,
+    color: colors.camera.textHigh,
+    fontSize: fontSize.sm,
     fontWeight: "700",
   },
   lastAngleHint: {
-    color: "rgba(191,219,254,0.68)",
-    fontSize: 11,
+    color: colors.camera.textAccentMuted,
+    fontSize: fontSize.micro,
     fontWeight: "400",
   },
   previewModalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.85)",
+    backgroundColor: colors.camera.modalOverlay,
     justifyContent: "center",
     alignItems: "center",
-    padding: 24,
+    padding: spacing.lg,
   },
   previewModalContent: {
     width: "100%",
     maxWidth: 340,
     alignItems: "center",
-    gap: 12,
+    gap: spacing.content,
   },
   previewModalTitle: {
-    color: "#fff",
-    fontSize: 18,
+    color: colors.camera.text,
+    fontSize: fontSize.h3,
     fontWeight: "700",
   },
   previewModalSubtitle: {
-    color: "rgba(255,255,255,0.6)",
-    fontSize: 14,
+    color: colors.camera.textMuted,
+    fontSize: fontSize.label,
     textAlign: "center",
   },
   previewModalImage: {
     width: "100%",
     aspectRatio: 4 / 3,
-    borderRadius: 12,
+    borderRadius: radius.lg,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.15)",
+    borderColor: colors.camera.borderMedium,
   },
   previewModalClose: {
-    paddingHorizontal: 32,
-    paddingVertical: 12,
-    backgroundColor: "rgba(255,255,255,0.15)",
-    borderRadius: 10,
-    marginTop: 8,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.content,
+    backgroundColor: colors.camera.modalButtonBg,
+    borderRadius: radius.md,
+    marginTop: spacing.sm,
   },
   previewModalCloseText: {
-    color: "#fff",
-    fontSize: 16,
+    color: colors.camera.text,
+    fontSize: fontSize.bodyLg,
     fontWeight: "600",
   },
 });

@@ -179,7 +179,7 @@ export function InspectionFlow({
             {error || "This inspection may have been removed or the link is invalid."}
           </p>
           <Link href="/dashboard">
-            <Button variant="outline" className="gap-2 rounded-xl">
+            <Button variant="outline" className="gap-2">
               <ArrowLeft className="h-4 w-4" /> Back to Dashboard
             </Button>
           </Link>
@@ -392,7 +392,7 @@ export function InspectionFlow({
                         onClick={() =>
                           handleCaptureRoom(room.id, room.baselineImages[0].id)
                         }
-                        className="text-xs rounded-xl"
+                        className="text-xs"
                       >
                         Redo
                       </Button>
@@ -402,7 +402,7 @@ export function InspectionFlow({
                         onClick={() =>
                           handleCaptureRoom(room.id, room.baselineImages[0].id)
                         }
-                        className="gap-1 rounded-xl"
+                        className="gap-1"
                       >
                         <ScanLine className="h-3.5 w-3.5" />
                         <span className="hidden sm:inline">Capture</span>

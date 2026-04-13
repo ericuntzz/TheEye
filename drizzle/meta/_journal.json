@@ -15,6 +15,27 @@
       "when": 1773421646487,
       "tag": "0001_rare_wild_child",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1774839950629,
+      "tag": "0002_nervous_the_stranger",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1774886946438,
+      "tag": "0003_flaky_gressill",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1774966238823,
+      "tag": "0004_sharp_echo",
+      "breakpoints": true
     }
   ]
 }

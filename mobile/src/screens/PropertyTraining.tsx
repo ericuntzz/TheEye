@@ -50,7 +50,7 @@ import {
   trainPreview,
   ApiError,
 } from "../lib/api";
-import { colors } from "../lib/tokens";
+import { colors, radius, spacing } from "../lib/tokens";
 import * as FileSystem from "expo-file-system";
 import { buildCapabilities, getVideoTrainingCapability } from "../lib/runtime/capabilities";
 
@@ -298,8 +298,8 @@ export default function PropertyTrainingScreen() {
     const uploadedCount = Array.from(uploadedIdsRef.current.values()).filter(ids => ids.length > 0).length;
     const newSinceLastPreview = uploadedCount - lastPreviewCountRef.current;
 
-    // Trigger preview every 5 uploads (or on the first 3 for quick early feedback)
-    const threshold = lastPreviewCountRef.current === 0 ? 3 : 5;
+    // Trigger previews earlier so room understanding builds while the user is still capturing.
+    const threshold = lastPreviewCountRef.current === 0 ? 2 : 3;
     if (newSinceLastPreview < threshold) return;
 
     previewInFlightRef.current = true;
@@ -1107,20 +1107,35 @@ export default function PropertyTrainingScreen() {
 
           const keyframeUris = await extractVideoKeyframeUris(capture.uri);
           try {
-            for (let frameIndex = 0; frameIndex < keyframeUris.length; frameIndex++) {
+            if (!isRunActive(currentRunId)) {
+              throw new Error("Processing canceled");
+            }
+
+            // Upload keyframes in parallel (up to all at once) for speed
+            const KEYFRAME_BATCH_SIZE = 4;
+            for (let batchStart = 0; batchStart < keyframeUris.length; batchStart += KEYFRAME_BATCH_SIZE) {
               if (!isRunActive(currentRunId)) {
                 throw new Error("Processing canceled");
               }
-
-              const frameResult = await uploadImageFile(
-                keyframeUris[frameIndex],
-                propertyId,
-                `training-video-${i + 1}-frame-${frameIndex + 1}.jpg`,
+              const batch = keyframeUris.slice(batchStart, batchStart + KEYFRAME_BATCH_SIZE);
+              const batchSettled = await Promise.allSettled(
+                batch.map((uri, idx) =>
+                  uploadImageFile(
+                    uri,
+                    propertyId,
+                    `training-video-${i + 1}-frame-${batchStart + idx + 1}.jpg`,
+                  ),
+                ),
               );
-              uploadedForCapture.push(frameResult.id);
-              mediaUploadIds.push(frameResult.id);
-              uploadedImageCount += 1;
-              progressCurrent += 1;
+              for (const settled of batchSettled) {
+                if (settled.status === "fulfilled") {
+                  uploadedForCapture.push(settled.value.id);
+                  mediaUploadIds.push(settled.value.id);
+                  uploadedImageCount += 1;
+                }
+                // Count progress regardless so bar doesn't stall
+                progressCurrent += 1;
+              }
               setUploadProgress({ current: progressCurrent, total });
             }
           } finally {
@@ -1251,7 +1266,7 @@ export default function PropertyTrainingScreen() {
       isAddMore ? "Add Photos to Training" : "Start Training",
       isAddMore
         ? `Upload ${captures.length} new photo${captures.length !== 1 ? "s" : ""} and update the AI training? Your existing training data is preserved.`
-        : `Upload ${captures.length} item${captures.length !== 1 ? "s" : ""} and train AI on this property? This may take a minute.`,
+        : `Upload ${captures.length} item${captures.length !== 1 ? "s" : ""} and train AI on this property? Training usually takes a few minutes.`,
       [
         { text: "Cancel", style: "cancel" },
         { text: isAddMore ? "Add & Update" : "Train", style: "default", onPress: handleUploadAndTrain },
@@ -1487,7 +1502,7 @@ export default function PropertyTrainingScreen() {
           </View>
 
           <Text style={styles.processingHint}>
-            This may take up to a minute
+            Training can take a few minutes for larger captures
           </Text>
           <TouchableOpacity
             style={styles.processingCancelButton}
@@ -1506,15 +1521,15 @@ export default function PropertyTrainingScreen() {
     // Defensive fallback: results phase without data (e.g., cancel race condition)
     return (
       <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
-        <View style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: 24 }}>
-          <Text style={{ fontSize: 16, color: colors.slate600, textAlign: "center", marginBottom: 16 }}>
+        <View style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: spacing.lg }}>
+          <Text style={{ fontSize: 16, color: colors.slate600, textAlign: "center", marginBottom: spacing.md }}>
             Training completed but results were not available.
           </Text>
           <TouchableOpacity
-            style={{ backgroundColor: "#2372B8", paddingHorizontal: 32, paddingVertical: 14, borderRadius: 12 }}
+            style={{ backgroundColor: colors.primary, paddingHorizontal: spacing.xl, paddingVertical: spacing.card, borderRadius: radius.lg }}
             onPress={() => navigation.goBack()}
           >
-            <Text style={{ color: "#fff", fontSize: 16, fontWeight: "600", textAlign: "center" }}>Done</Text>
+            <Text style={{ color: colors.primaryForeground, fontSize: 16, fontWeight: "600", textAlign: "center" }}>Done</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -1739,7 +1754,7 @@ export default function PropertyTrainingScreen() {
       {error && (
         <View style={styles.errorBanner}>
           <Text style={styles.errorText}>{error}</Text>
-          <View style={{ flexDirection: "row", gap: 16 }}>
+          <View style={{ flexDirection: "row", gap: spacing.md }}>
             <TouchableOpacity
               onPress={() =>
                 navigation.navigate("ReportIssue", {
@@ -1824,7 +1839,7 @@ export default function PropertyTrainingScreen() {
                       />
                     ) : (
                       <View style={[styles.thumbnailImage, { backgroundColor: colors.camera.background, justifyContent: "center", alignItems: "center" }]}>
-                        <Text style={{ color: "#fff", fontSize: 22 }}>▶</Text>
+                        <Text style={{ color: colors.camera.text, fontSize: 22 }}>▶</Text>
                       </View>
                     )
                   ) : (
@@ -1849,12 +1864,12 @@ export default function PropertyTrainingScreen() {
                       </View>
                     );
                     if (status === "uploading") return (
-                      <View style={[styles.uploadStatusBadge, { backgroundColor: "rgba(59,130,246,0.85)" }]}>
-                        <Text style={styles.uploadStatusText}>↑</Text>
+                      <View style={styles.uploadStatusBadge}>
+                        <Text style={styles.uploadStatusText}>✓</Text>
                       </View>
                     );
                     if (status === "failed") return (
-                      <View style={[styles.uploadStatusBadge, { backgroundColor: "rgba(239,68,68,0.85)" }]}>
+                      <View style={[styles.uploadStatusBadge, { backgroundColor: colors.severity.urgentRepair }]}>
                         <Text style={styles.uploadStatusText}>!</Text>
                       </View>
                     );
@@ -1865,7 +1880,7 @@ export default function PropertyTrainingScreen() {
                 <TouchableOpacity
                   style={styles.thumbnailDeleteButton}
                   onPress={() => handleRemoveCapture(item.id)}
-                  hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                  hitSlop={{ top: spacing.tight, bottom: spacing.tight, left: spacing.tight, right: spacing.tight }}
                 >
                   <Text style={styles.thumbnailDeleteText}>✕</Text>
                 </TouchableOpacity>
@@ -1902,10 +1917,7 @@ export default function PropertyTrainingScreen() {
                     const uploadedCount = captures.filter(c => uploadStatuses.get(c.id) === "uploaded").length;
                     const photoCount = captures.filter(c => c.type === "photo").length;
                     if (uploadedCount > 0 && uploadedCount >= photoCount) {
-                      return `Done (${captures.length}) ✓`;
-                    }
-                    if (uploadedCount > 0) {
-                      return `Done (${captures.length}) · ${uploadedCount} uploaded`;
+                      return `Done ✓`;
                     }
                     return `Done (${captures.length})`;
                   })()}
@@ -2075,15 +2087,15 @@ const styles = StyleSheet.create({
 
   // ── Intro Phase ──
   introContent: {
-    padding: 20,
-    paddingTop: 12,
-    paddingBottom: 40,
+    padding: spacing.screen,
+    paddingTop: spacing.content,
+    paddingBottom: spacing.safe,
   },
   backButton: {
-    marginBottom: 20,
+    marginBottom: spacing.screen,
     alignSelf: "flex-start",
-    paddingVertical: 4,
-    paddingRight: 8,
+    paddingVertical: spacing.xs,
+    paddingRight: spacing.sm,
   },
   backButtonText: {
     color: colors.muted,
@@ -2095,19 +2107,19 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: colors.heading,
     letterSpacing: -0.5,
-    marginBottom: 4,
+    marginBottom: spacing.xs,
   },
   propertyLabel: {
     fontSize: 16,
     color: colors.primary,
     fontWeight: "600",
-    marginBottom: 28,
+    marginBottom: spacing.section,
   },
   instructionCard: {
     backgroundColor: colors.card,
     borderRadius: 18,
     padding: 22,
-    marginBottom: 16,
+    marginBottom: spacing.md,
     borderWidth: 1,
     borderColor: colors.stone,
   },
@@ -2115,22 +2127,22 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: "600",
     color: colors.heading,
-    marginBottom: 20,
+    marginBottom: spacing.screen,
     letterSpacing: -0.2,
   },
   stepRow: {
     flexDirection: "row",
     alignItems: "flex-start",
-    marginBottom: 18,
-    gap: 14,
+    marginBottom: spacing.container,
+    gap: spacing.card,
   },
   stepCircle: {
     width: 30,
     height: 30,
-    borderRadius: 15,
-    backgroundColor: "rgba(77, 166, 255, 0.15)",
+    borderRadius: radius.full,
+    backgroundColor: colors.primaryBgStrong,
     borderWidth: 1.5,
-    borderColor: "rgba(77, 166, 255, 0.4)",
+    borderColor: colors.primaryBorder,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -2141,13 +2153,13 @@ const styles = StyleSheet.create({
   },
   stepContent: {
     flex: 1,
-    paddingTop: 2,
+    paddingTop: spacing.xxs,
   },
   stepTitle: {
     color: colors.heading,
     fontSize: 15,
     fontWeight: "600",
-    marginBottom: 2,
+    marginBottom: spacing.xxs,
   },
   stepText: {
     color: colors.muted,
@@ -2155,18 +2167,18 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   tipCard: {
-    backgroundColor: "rgba(77, 166, 255, 0.06)",
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 32,
+    backgroundColor: colors.primaryBg,
+    borderRadius: radius.xl,
+    padding: spacing.screen,
+    marginBottom: spacing.xl,
     borderWidth: 1,
-    borderColor: "rgba(77, 166, 255, 0.12)",
+    borderColor: colors.primaryBgStrong,
   },
   tipTitle: {
     fontSize: 14,
     fontWeight: "600",
     color: colors.primary,
-    marginBottom: 10,
+    marginBottom: spacing.element,
     letterSpacing: 0.3,
     textTransform: "uppercase",
   },
@@ -2176,18 +2188,18 @@ const styles = StyleSheet.create({
     lineHeight: 24,
   },
   buildCapabilityCard: {
-    backgroundColor: "rgba(245, 158, 11, 0.08)",
-    borderRadius: 16,
-    padding: 18,
-    marginBottom: 24,
+    backgroundColor: colors.warningBg,
+    borderRadius: radius.xl,
+    padding: spacing.container,
+    marginBottom: spacing.lg,
     borderWidth: 1,
-    borderColor: "rgba(245, 158, 11, 0.18)",
+    borderColor: colors.warningBg,
   },
   buildCapabilityTitle: {
     fontSize: 13,
     fontWeight: "700",
     color: colors.heading,
-    marginBottom: 6,
+    marginBottom: spacing.tight,
     letterSpacing: 0.2,
     textTransform: "uppercase",
   },
@@ -2198,11 +2210,11 @@ const styles = StyleSheet.create({
   },
   startButton: {
     backgroundColor: colors.primary,
-    borderRadius: 16,
-    paddingVertical: 18,
+    borderRadius: radius.xl,
+    paddingVertical: spacing.container,
     alignItems: "center",
     marginTop: "auto",
-    marginBottom: 20,
+    marginBottom: spacing.screen,
     shadowColor: colors.primary,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
@@ -2221,39 +2233,39 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    padding: 32,
+    padding: spacing.xl,
   },
   spinnerArea: {
     width: 100,
     height: 100,
     justifyContent: "center",
     alignItems: "center",
-    marginBottom: 32,
+    marginBottom: spacing.xl,
   },
   breatheRing: {
     position: "absolute",
     width: 100,
     height: 100,
-    borderRadius: 50,
+    borderRadius: radius.full,
     borderWidth: 1.5,
     borderColor: colors.primary,
-    backgroundColor: "rgba(77, 166, 255, 0.04)",
+    backgroundColor: colors.primaryBg,
   },
   spinnerArc: {
     position: "absolute",
     width: 80,
     height: 80,
-    borderRadius: 40,
+    borderRadius: radius.full,
     borderWidth: 3,
     borderColor: "transparent",
     borderTopColor: colors.primary,
-    borderRightColor: "rgba(77, 166, 255, 0.4)",
+    borderRightColor: colors.primaryBorder,
   },
   spinnerCenter: {
     width: 48,
     height: 48,
-    borderRadius: 24,
-    backgroundColor: "rgba(77, 166, 255, 0.08)",
+    borderRadius: radius.full,
+    backgroundColor: colors.primaryBg,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -2270,13 +2282,13 @@ const styles = StyleSheet.create({
     color: colors.heading,
     fontSize: 22,
     fontWeight: "600",
-    marginBottom: 8,
+    marginBottom: spacing.sm,
     letterSpacing: -0.3,
   },
   processingSubtext: {
     color: colors.muted,
     fontSize: 16,
-    marginBottom: 28,
+    marginBottom: spacing.section,
   },
   rotatingMessage: {
     minHeight: 24,
@@ -2286,8 +2298,8 @@ const styles = StyleSheet.create({
     width: "80%",
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
-    marginBottom: 16,
+    gap: spacing.content,
+    marginBottom: spacing.md,
   },
   progressBar: {
     flex: 1,
@@ -2307,8 +2319,8 @@ const styles = StyleSheet.create({
     top: -3,
     width: 12,
     height: 12,
-    borderRadius: 6,
-    backgroundColor: "rgba(77, 166, 255, 0.35)",
+    borderRadius: radius.full,
+    backgroundColor: colors.primaryBorder,
     marginLeft: -6,
   },
   progressPercent: {
@@ -2321,18 +2333,18 @@ const styles = StyleSheet.create({
   stepDots: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 32,
-    marginBottom: 24,
-    marginTop: 8,
+    gap: spacing.xl,
+    marginBottom: spacing.lg,
+    marginTop: spacing.sm,
   },
   stepDotItem: {
     alignItems: "center",
-    gap: 6,
+    gap: spacing.tight,
   },
   stepDotCircle: {
     width: 24,
     height: 24,
-    borderRadius: 12,
+    borderRadius: radius.full,
     backgroundColor: colors.stone,
     justifyContent: "center",
     alignItems: "center",
@@ -2341,7 +2353,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     width: 28,
     height: 28,
-    borderRadius: 14,
+    borderRadius: radius.full,
   },
   stepDotDone: {
     backgroundColor: colors.success,
@@ -2349,7 +2361,7 @@ const styles = StyleSheet.create({
   stepDotPulse: {
     width: 8,
     height: 8,
-    borderRadius: 4,
+    borderRadius: radius.full,
     backgroundColor: colors.primaryForeground,
   },
   stepDotCheck: {
@@ -2375,10 +2387,10 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   processingCancelButton: {
-    marginTop: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 12,
+    marginTop: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.element,
+    borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.stone,
     backgroundColor: colors.card,
@@ -2391,23 +2403,23 @@ const styles = StyleSheet.create({
 
   // ── Results Phase ──
   resultsContent: {
-    padding: 20,
-    paddingTop: 32,
+    padding: spacing.screen,
+    paddingTop: spacing.xl,
   },
   successHeader: {
     alignItems: "center",
-    marginBottom: 28,
+    marginBottom: spacing.section,
   },
   successCircle: {
     width: 56,
     height: 56,
-    borderRadius: 28,
-    backgroundColor: "rgba(34, 197, 94, 0.12)",
+    borderRadius: radius.full,
+    backgroundColor: colors.successBg,
     borderWidth: 2,
-    borderColor: "rgba(34, 197, 94, 0.3)",
+    borderColor: colors.successBorder,
     justifyContent: "center",
     alignItems: "center",
-    marginBottom: 16,
+    marginBottom: spacing.md,
   },
   successCheck: {
     color: colors.success,
@@ -2418,7 +2430,7 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: "600",
     color: colors.heading,
-    marginBottom: 4,
+    marginBottom: spacing.xs,
     letterSpacing: -0.5,
   },
   resultsSubtitle: {
@@ -2428,14 +2440,14 @@ const styles = StyleSheet.create({
   },
   statsRow: {
     flexDirection: "row",
-    gap: 10,
-    marginBottom: 28,
+    gap: spacing.element,
+    marginBottom: spacing.section,
   },
   statCard: {
     flex: 1,
     backgroundColor: colors.card,
-    borderRadius: 16,
-    padding: 18,
+    borderRadius: radius.xl,
+    padding: spacing.container,
     alignItems: "center",
     borderWidth: 1,
     borderColor: colors.stone,
@@ -2444,7 +2456,7 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: "600",
     color: colors.primary,
-    marginBottom: 4,
+    marginBottom: spacing.xs,
   },
   statLabel: {
     fontSize: 12,
@@ -2456,28 +2468,28 @@ const styles = StyleSheet.create({
   dedupeSummary: {
     fontSize: 13,
     color: colors.muted,
-    marginTop: -16,
-    marginBottom: 8,
+    marginTop: -spacing.md,
+    marginBottom: spacing.sm,
     textAlign: "center",
   },
   mediaSummaryNote: {
     fontSize: 13,
     color: colors.warning,
-    marginBottom: 18,
+    marginBottom: spacing.container,
     textAlign: "center",
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: "600",
     color: colors.heading,
-    marginBottom: 12,
+    marginBottom: spacing.content,
     letterSpacing: -0.2,
   },
   roomCard: {
     backgroundColor: colors.card,
     borderRadius: 14,
-    padding: 16,
-    marginBottom: 10,
+    padding: spacing.md,
+    marginBottom: spacing.element,
     borderWidth: 1,
     borderColor: colors.stone,
   },
@@ -2485,7 +2497,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 8,
+    marginBottom: spacing.sm,
   },
   roomName: {
     fontSize: 16,
@@ -2494,9 +2506,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   roomTypeBadge: {
-    backgroundColor: "rgba(77, 166, 255, 0.1)",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+    backgroundColor: colors.primaryBg,
+    paddingHorizontal: spacing.element,
+    paddingVertical: spacing.xs,
     borderRadius: 6,
   },
   roomTypeText: {
@@ -2508,7 +2520,7 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: 13,
     lineHeight: 20,
-    marginBottom: 6,
+    marginBottom: spacing.tight,
   },
   roomBaselines: {
     color: colors.muted,
@@ -2516,15 +2528,15 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
   resultsFooter: {
-    padding: 20,
-    paddingBottom: 32,
-    gap: 12,
+    padding: spacing.screen,
+    paddingBottom: spacing.xl,
+    gap: spacing.content,
   },
   addMoreButton: {
     borderWidth: 1.5,
     borderColor: colors.primary,
-    borderRadius: 16,
-    paddingVertical: 16,
+    borderRadius: radius.xl,
+    paddingVertical: spacing.md,
     alignItems: "center",
   },
   addMoreButtonText: {
@@ -2536,12 +2548,12 @@ const styles = StyleSheet.create({
   addMoreButtonSub: {
     color: colors.muted,
     fontSize: 13,
-    marginTop: 2,
+    marginTop: spacing.xxs,
   },
   doneButton: {
     backgroundColor: colors.primary,
-    borderRadius: 16,
-    paddingVertical: 18,
+    borderRadius: radius.xl,
+    paddingVertical: spacing.container,
     alignItems: "center",
     shadowColor: colors.primary,
     shadowOffset: { width: 0, height: 4 },
@@ -2565,54 +2577,54 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: 16,
-    paddingTop: 8,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
     zIndex: 10,
   },
   cameraTopBarLandscape: {
-    paddingHorizontal: 32,
+    paddingHorizontal: spacing.xl,
   },
   cameraBackButton: {
-    backgroundColor: "rgba(0,0,0,0.65)",
-    borderRadius: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    backgroundColor: colors.camera.overlay,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.element,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
+    borderColor: colors.camera.borderSubtle,
   },
   cameraBackText: {
-    color: "#fff",
+    color: colors.camera.text,
     fontSize: 15,
     fontWeight: "600",
   },
   captureCountBadge: {
-    backgroundColor: "rgba(0,0,0,0.65)",
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    backgroundColor: colors.camera.overlay,
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.element,
     borderWidth: 1,
-    borderColor: "rgba(77,166,255,0.3)",
+    borderColor: colors.primaryBorder,
   },
   captureCountText: {
-    color: "#fff",
+    color: colors.camera.text,
     fontSize: 15,
     fontWeight: "600",
   },
   trainingBadge: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "rgba(0,0,0,0.65)",
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    gap: 6,
+    backgroundColor: colors.camera.overlay,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.content,
+    paddingVertical: spacing.sm,
+    gap: spacing.tight,
     borderWidth: 1,
-    borderColor: "rgba(34, 197, 94, 0.2)",
+    borderColor: colors.successBorder,
   },
   trainingDot: {
     width: 8,
     height: 8,
-    borderRadius: 4,
+    borderRadius: radius.full,
     backgroundColor: colors.success,
   },
   trainingBadgeText: {
@@ -2622,7 +2634,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   recordingBadge: {
-    borderColor: "rgba(239, 68, 68, 0.4)",
+    borderColor: colors.errorBorder,
   },
   recordingDot: {
     backgroundColor: colors.error,
@@ -2633,48 +2645,48 @@ const styles = StyleSheet.create({
   errorBanner: {
     position: "absolute",
     top: 100,
-    left: 16,
-    right: 16,
-    backgroundColor: "rgba(239, 68, 68, 0.92)",
+    left: spacing.md,
+    right: spacing.md,
+    backgroundColor: colors.severity.urgentRepair,
     borderRadius: 14,
-    padding: 16,
+    padding: spacing.md,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     zIndex: 20,
     borderWidth: 1,
-    borderColor: "rgba(239, 68, 68, 0.5)",
+    borderColor: colors.errorBorder,
   },
   errorText: {
-    color: "#fff",
+    color: colors.camera.text,
     fontSize: 14,
     flex: 1,
-    marginRight: 8,
+    marginRight: spacing.sm,
     fontWeight: "500",
   },
   errorReport: {
-    color: "rgba(255,255,255,0.7)",
+    color: colors.camera.textMuted,
     fontWeight: "500",
     fontSize: 14,
     textDecorationLine: "underline" as const,
   },
   errorDismiss: {
-    color: "#fff",
+    color: colors.camera.text,
     fontWeight: "600",
     fontSize: 14,
   },
   infoBanner: {
     position: "absolute",
     top: 172,
-    left: 16,
-    right: 16,
-    backgroundColor: "rgba(251, 191, 36, 0.96)",
+    left: spacing.md,
+    right: spacing.md,
+    backgroundColor: colors.warning,
     borderRadius: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.content,
     zIndex: 18,
     borderWidth: 1,
-    borderColor: "rgba(251, 191, 36, 0.58)",
+    borderColor: colors.warningBg,
   },
   infoText: {
     color: colors.heading,
@@ -2685,40 +2697,40 @@ const styles = StyleSheet.create({
   guidanceContainer: {
     position: "absolute",
     top: "38%",
-    left: 20,
-    right: 20,
+    left: spacing.screen,
+    right: spacing.screen,
     alignItems: "center",
     zIndex: 5,
   },
   guidanceText: {
-    backgroundColor: "rgba(0,0,0,0.65)",
-    color: "#fff",
+    backgroundColor: colors.camera.overlay,
+    color: colors.camera.text,
     fontSize: 15,
     fontWeight: "600",
     paddingHorizontal: 22,
-    paddingVertical: 12,
+    paddingVertical: spacing.content,
     borderRadius: 24,
     overflow: "hidden",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
+    borderColor: colors.camera.borderSubtle,
   },
 
   // ── Progressive Discovery Banner ──
   discoveryBanner: {
     position: "absolute",
     bottom: "22%",
-    left: 16,
-    right: 16,
-    backgroundColor: "rgba(2, 6, 23, 0.75)",
+    left: spacing.md,
+    right: spacing.md,
+    backgroundColor: colors.camera.panelBg,
     borderRadius: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.element,
     zIndex: 5,
     borderWidth: 1,
-    borderColor: "rgba(35, 114, 184, 0.3)",
+    borderColor: colors.primaryBorder,
   },
   discoveryTitle: {
-    color: "#2372B8",
+    color: colors.primary,
     fontSize: 11,
     fontWeight: "700",
     letterSpacing: 0.5,
@@ -2726,15 +2738,15 @@ const styles = StyleSheet.create({
     marginBottom: 3,
   },
   discoveryRooms: {
-    color: "rgba(255,255,255,0.9)",
+    color: colors.camera.textBright,
     fontSize: 14,
     fontWeight: "600",
   },
   discoveryItems: {
-    color: "rgba(255,255,255,0.5)",
+    color: colors.camera.textMuted,
     fontSize: 11,
     fontWeight: "500",
-    marginTop: 2,
+    marginTop: spacing.xxs,
   },
 
   // ── Zoom Indicator ──
@@ -2742,16 +2754,16 @@ const styles = StyleSheet.create({
     position: "absolute",
     bottom: "45%",
     alignSelf: "center",
-    backgroundColor: "rgba(0,0,0,0.65)",
-    borderRadius: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
+    backgroundColor: colors.camera.overlay,
+    borderRadius: radius.xl,
+    paddingHorizontal: spacing.card,
+    paddingVertical: spacing.tight,
     zIndex: 5,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
+    borderColor: colors.camera.borderSubtle,
   },
   zoomText: {
-    color: "#fff",
+    color: colors.camera.text,
     fontSize: 14,
     fontWeight: "600",
   },
@@ -2765,10 +2777,10 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   thumbnailStrip: {
-    paddingHorizontal: 16,
-    paddingBottom: 14,
-    paddingTop: 6,
-    gap: 10,
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.card,
+    paddingTop: spacing.tight,
+    gap: spacing.element,
   },
   thumbnailWrapper: {
     position: "relative",
@@ -2776,10 +2788,10 @@ const styles = StyleSheet.create({
   thumbnail: {
     width: 56,
     height: 56,
-    borderRadius: 10,
+    borderRadius: radius.md,
     overflow: "hidden",
     borderWidth: 2,
-    borderColor: "rgba(255,255,255,0.25)",
+    borderColor: colors.camera.borderPreview,
   },
   thumbnailImage: {
     width: "100%",
@@ -2787,53 +2799,53 @@ const styles = StyleSheet.create({
   },
   thumbnailDeleteButton: {
     position: "absolute",
-    top: -5,
-    right: -5,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: "rgba(239, 68, 68, 0.92)",
+    top: -4,
+    right: -4,
+    width: 18,
+    height: 18,
+    borderRadius: radius.full,
+    backgroundColor: "rgba(0, 0, 0, 0.55)",
     justifyContent: "center",
     alignItems: "center",
-    borderWidth: 1.5,
-    borderColor: "rgba(0,0,0,0.4)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.2)",
     zIndex: 1,
   },
   thumbnailDeleteText: {
-    color: "#fff",
-    fontSize: 10,
+    color: "rgba(255, 255, 255, 0.85)",
+    fontSize: 9,
     fontWeight: "600",
-    lineHeight: 12,
+    lineHeight: 11,
   },
   videoIndicator: {
     position: "absolute",
-    bottom: 2,
-    left: 2,
+    bottom: spacing.xxs,
+    left: spacing.xxs,
     width: 18,
     height: 18,
-    borderRadius: 9,
-    backgroundColor: "rgba(0,0,0,0.65)",
+    borderRadius: radius.full,
+    backgroundColor: colors.camera.overlay,
     justifyContent: "center",
     alignItems: "center",
   },
   uploadStatusBadge: {
     position: "absolute",
-    bottom: 2,
-    right: 2,
+    bottom: spacing.xxs,
+    right: spacing.xxs,
     width: 16,
     height: 16,
-    borderRadius: 8,
-    backgroundColor: "rgba(34,197,94,0.85)",
+    borderRadius: radius.full,
+    backgroundColor: colors.success,
     justifyContent: "center",
     alignItems: "center",
   },
   uploadStatusText: {
-    color: "#fff",
+    color: colors.camera.text,
     fontSize: 9,
     fontWeight: "700",
   },
   videoIndicatorText: {
-    color: "#fff",
+    color: colors.camera.text,
     fontSize: 8,
     fontWeight: "600",
   },
@@ -2841,22 +2853,22 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 32,
-    paddingBottom: 28,
+    paddingHorizontal: spacing.xl,
+    paddingBottom: spacing.section,
   },
   finishButton: {
-    backgroundColor: "rgba(77, 166, 255, 0.92)",
-    borderRadius: 28,
+    backgroundColor: colors.primary,
+    borderRadius: radius.full,
     paddingHorizontal: 22,
-    paddingVertical: 14,
+    paddingVertical: spacing.card,
     minWidth: 100,
     alignItems: "center",
     borderWidth: 1,
-    borderColor: "rgba(77, 166, 255, 0.5)",
+    borderColor: colors.primaryBorder,
   },
   finishButtonDisabled: {
-    backgroundColor: "rgba(100, 116, 139, 0.35)",
-    borderColor: "rgba(100, 116, 139, 0.2)",
+    backgroundColor: colors.camera.pillBg,
+    borderColor: colors.camera.pillBorder,
   },
   finishButtonText: {
     color: colors.primaryForeground,
@@ -2869,21 +2881,21 @@ const styles = StyleSheet.create({
   captureButton: {
     width: 76,
     height: 76,
-    borderRadius: 38,
-    backgroundColor: "rgba(255,255,255,0.15)",
+    borderRadius: radius.full,
+    backgroundColor: colors.camera.borderMedium,
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 2,
-    borderColor: "rgba(255,255,255,0.2)",
+    borderColor: colors.camera.borderPreview,
   },
   captureButtonRecording: {
-    backgroundColor: "rgba(239, 68, 68, 0.2)",
-    borderColor: "rgba(239, 68, 68, 0.4)",
+    backgroundColor: colors.errorBg,
+    borderColor: colors.errorBorder,
   },
   captureRing: {
     width: 58,
     height: 58,
-    borderRadius: 29,
+    borderRadius: radius.full,
     borderWidth: 4,
     borderColor: colors.camera.text,
   },
@@ -2893,7 +2905,7 @@ const styles = StyleSheet.create({
   captureRingRecording: {
     width: 32,
     height: 32,
-    borderRadius: 8,
+    borderRadius: radius.sm,
     borderWidth: 0,
     backgroundColor: colors.error,
   },
@@ -2901,25 +2913,25 @@ const styles = StyleSheet.create({
     position: "absolute",
     width: 58,
     height: 58,
-    borderRadius: 29,
+    borderRadius: radius.full,
     borderWidth: 2,
     borderColor: colors.error,
   },
   modeToggle: {
-    backgroundColor: "rgba(0,0,0,0.65)",
+    backgroundColor: colors.camera.overlay,
     borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.element,
     minWidth: 80,
     alignItems: "center",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
+    borderColor: colors.camera.borderSubtle,
   },
   modeToggleDisabled: {
     opacity: 0.55,
   },
   modeToggleText: {
-    color: "#fff",
+    color: colors.camera.text,
     fontSize: 12,
     fontWeight: "600",
     letterSpacing: 1,
@@ -2929,12 +2941,12 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     justifyContent: "center",
     alignItems: "center",
-    padding: 32,
+    padding: spacing.xl,
   },
   permissionCard: {
     backgroundColor: colors.card,
     borderRadius: 20,
-    padding: 32,
+    padding: spacing.xl,
     alignItems: "center",
     borderWidth: 1,
     borderColor: colors.stone,
@@ -2945,20 +2957,20 @@ const styles = StyleSheet.create({
     color: colors.heading,
     fontSize: 20,
     fontWeight: "600",
-    marginBottom: 12,
+    marginBottom: spacing.content,
   },
   permissionText: {
     color: colors.muted,
     fontSize: 15,
     textAlign: "center",
-    marginBottom: 24,
+    marginBottom: spacing.lg,
     lineHeight: 22,
   },
   permissionButton: {
     backgroundColor: colors.primary,
     borderRadius: 14,
-    paddingHorizontal: 28,
-    paddingVertical: 14,
+    paddingHorizontal: spacing.section,
+    paddingVertical: spacing.card,
     shadowColor: colors.primary,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
@@ -2973,14 +2985,14 @@ const styles = StyleSheet.create({
 
   // ── Capture Flash ──
   captureFlash: {
-    backgroundColor: "#fff",
+    backgroundColor: colors.camera.text,
     zIndex: 50,
   },
 
   // ── Full-Screen Preview ──
   previewOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.95)",
+    backgroundColor: colors.camera.sheetBg,
   },
   previewContainer: {
     flex: 1,
@@ -2989,32 +3001,32 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.content,
   },
   previewCloseButton: {
-    backgroundColor: "rgba(255,255,255,0.12)",
-    borderRadius: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    backgroundColor: colors.camera.borderLight,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.element,
   },
   previewCloseText: {
-    color: "#fff",
+    color: colors.camera.text,
     fontSize: 15,
     fontWeight: "600",
   },
   previewTypeLabel: {
-    color: "rgba(255,255,255,0.6)",
+    color: colors.camera.textMuted,
     fontSize: 14,
     fontWeight: "600",
   },
   previewDeleteButton: {
-    backgroundColor: "rgba(239, 68, 68, 0.15)",
-    borderRadius: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    backgroundColor: colors.errorBg,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.element,
     borderWidth: 1,
-    borderColor: "rgba(239, 68, 68, 0.3)",
+    borderColor: colors.errorBorder,
   },
   previewDeleteText: {
     color: colors.error,
@@ -3023,8 +3035,8 @@ const styles = StyleSheet.create({
   },
   previewImage: {
     flex: 1,
-    borderRadius: 8,
-    margin: 16,
+    borderRadius: radius.sm,
+    margin: spacing.md,
   },
   previewVideoPlaceholder: {
     flex: 1,
@@ -3036,25 +3048,25 @@ const styles = StyleSheet.create({
   },
   previewVideoBadge: {
     position: "absolute",
-    bottom: 28,
+    bottom: spacing.section,
     alignSelf: "center",
-    backgroundColor: "rgba(0,0,0,0.68)",
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    backgroundColor: colors.camera.overlay,
+    borderRadius: radius.full,
+    paddingHorizontal: spacing.content,
+    paddingVertical: spacing.tight,
   },
   previewVideoBadgeText: {
-    color: "rgba(255,255,255,0.92)",
+    color: colors.camera.textBright,
     fontSize: 12,
     fontWeight: "600",
   },
   previewVideoIcon: {
-    color: "rgba(255,255,255,0.4)",
+    color: colors.camera.textMuted,
     fontSize: 64,
-    marginBottom: 16,
+    marginBottom: spacing.md,
   },
   previewVideoText: {
-    color: "rgba(255,255,255,0.5)",
+    color: colors.camera.textMuted,
     fontSize: 16,
     fontWeight: "500",
   },

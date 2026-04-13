@@ -20,8 +20,8 @@ export default function GlobalError({
           margin: 0,
           fontFamily:
             'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
-          backgroundColor: "#0a0a0a",
-          color: "#fafafa",
+          backgroundColor: "var(--dark-surface)",
+          color: "var(--primary-foreground)",
           display: "flex",
           minHeight: "100vh",
           alignItems: "center",
@@ -32,7 +32,7 @@ export default function GlobalError({
           <h1 style={{ fontSize: "1.25rem", fontWeight: 600, marginBottom: "0.5rem" }}>
             Something went wrong
           </h1>
-          <p style={{ fontSize: "0.875rem", color: "#a1a1aa", marginBottom: "1.5rem" }}>
+          <p style={{ fontSize: "0.875rem", color: "var(--muted-foreground)", marginBottom: "1.5rem" }}>
             A critical error occurred. Please try again.
           </p>
           <button
@@ -42,9 +42,9 @@ export default function GlobalError({
               fontSize: "0.875rem",
               fontWeight: 500,
               borderRadius: "0.5rem",
-              border: "1px solid #27272a",
+              border: "1px solid var(--stone)",
               backgroundColor: "transparent",
-              color: "#fafafa",
+              color: "var(--primary-foreground)",
               cursor: "pointer",
             }}
           >

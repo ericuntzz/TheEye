@@ -1,0 +1,2 @@
+[2026-03-15 22:00] CRITICAL: .next build cache corruption causes 500 Internal Server Errors after 3-5 navigations -- webpack manifest files and compiled chunks disappear during runtime (Next.js 15.5.12)
+[2026-03-16 21:00] CRITICAL: Build system still broken — routes-manifest.json never generated (both dev and prod build). Root cause: Node.js v25.6.1 incompatibility with Next.js 15.5.12. Blocks all testing. Day 2 of this issue.

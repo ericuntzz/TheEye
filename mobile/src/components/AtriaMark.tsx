@@ -7,6 +7,7 @@
 
 import React from "react";
 import Svg, { Path } from "react-native-svg";
+import { colors } from "../lib/tokens";
 
 interface AtriaMarkProps {
   size?: number;
@@ -15,9 +16,9 @@ interface AtriaMarkProps {
 }
 
 const COLOR_MAP: Record<string, string> = {
-  navy: "#1B2A4A",
-  white: "#FFFFFF",
-  sky: "#4DA6FF",
+  navy: colors.heading,
+  white: colors.primaryForeground,
+  sky: colors.severity.safety,
 };
 
 export function AtriaMark({

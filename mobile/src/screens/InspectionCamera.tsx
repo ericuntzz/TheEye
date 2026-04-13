@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect } from "react";
+import React, { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import {
   View,
   Text,
@@ -12,14 +12,16 @@ import {
   KeyboardAvoidingView,
   Platform,
   Linking,
+  Keyboard,
   Animated,
   ActivityIndicator,
   AppState,
+  ScrollView,
   type AppStateStatus,
 } from "react-native";
 import { Image } from "expo-image";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { CameraView, useCameraPermissions } from "expo-camera";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { CameraView, useCameraPermissions, useMicrophonePermissions } from "expo-camera";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { runOnJS } from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
@@ -30,8 +32,8 @@ import type { RootStackParamList, SummaryData, SummaryRoomData, SummaryFindingDa
 import FindingsPanel, { type DismissReason } from "../components/FindingsPanel";
 import CoverageTracker from "../components/CoverageTracker";
 import { Ionicons } from "@expo/vector-icons";
-import { colors } from "../lib/tokens";
-import type { Finding } from "../lib/inspection/types";
+import { colors, radius, spacing } from "../lib/tokens";
+import type { Finding, AddItemType } from "../lib/inspection/types";
 import {
   SessionManager,
   type CompletionTier,
@@ -43,11 +45,22 @@ import { ChangeDetector } from "../lib/vision/change-detector";
 import { RoomDetector, type BaselineCandidate } from "../lib/vision/room-detector";
 import { loadOnnxModel, type OnnxModelLoader } from "../lib/vision/onnx-model";
 import {
+  ApiError,
   getInspectionBaselines,
   submitBulkResults,
   getPropertyFeedback,
   postFindingFeedback,
+  getPropertySupplies,
+  reportError,
+  uploadImageFile,
+  uploadVideoFile,
 } from "../lib/api";
+import SupplyPicker, { type SupplyItem } from "../components/SupplyPicker";
+import AddItemComposer, {
+  type ComposerResult,
+  type ComposerInitialValues,
+} from "../components/AddItemComposer";
+import AISuggestionCard, { inferItemType } from "../components/AISuggestionCard";
 import { supabase } from "../lib/supabase";
 import * as FileSystem from "expo-file-system";
 import { decodeBase64JpegToRgb, rgbToGrayscale } from "../lib/vision/image-utils";
@@ -115,9 +128,9 @@ type LocalizationState =
   | "verification_failed"; // Server could not geometrically verify this view
 
 function getSimilarityColor(similarity: number): string {
-  if (similarity >= 0.55) return "#22c55e"; // green
-  if (similarity >= 0.45) return "#eab308"; // yellow
-  return "#ef4444"; // red
+  if (similarity >= 0.55) return colors.category.restock; // green
+  if (similarity >= 0.45) return colors.severity.maintenance; // yellow
+  return colors.severity.urgentRepair; // red
 }
 
 function getLocalizationGuidance(
@@ -177,6 +190,17 @@ function normalizeInspectionGuidance(guidance?: string | null): string {
   return text;
 }
 
+function resolveFindingSource(
+  finding: Pick<Finding, "category" | "source">,
+): "manual_note" | "ai" {
+  if (finding.source) {
+    return finding.source;
+  }
+  return ["manual_note", "restock", "operational"].includes(finding.category)
+    ? "manual_note"
+    : "ai";
+}
+
 function cosineSimilarity(
   a: ArrayLike<number>,
   b: ArrayLike<number>,
@@ -199,10 +223,145 @@ type CapturedFrameData = {
   uri: string;
 };
 
+type AddItemAttachmentDraft = {
+  kind: "photo" | "video";
+  localUri: string;
+};
+
+type QuickAddTemplate = {
+  id: string;
+  itemType: AddItemType;
+  label: string;
+  value: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  roomKeywords?: string[];
+};
+
+const ADD_ITEM_TYPE_OPTIONS: Array<{
+  key: AddItemType;
+  label: string;
+  icon: keyof typeof Ionicons.glyphMap;
+}> = [
+  { key: "restock", label: "Restock", icon: "cart-outline" },
+  { key: "maintenance", label: "Maintenance", icon: "construct-outline" },
+  { key: "task", label: "Task", icon: "checkbox-outline" },
+  { key: "note", label: "Note", icon: "document-text-outline" },
+];
+
+const QUICK_ADD_TEMPLATES: QuickAddTemplate[] = [
+  {
+    id: "maint-faucet",
+    itemType: "maintenance",
+    label: "Leaky faucet",
+    value: "Leaky faucet needs repair",
+    icon: "water-outline",
+    roomKeywords: ["bath", "kitchen", "laundry"],
+  },
+  {
+    id: "maint-bulb",
+    itemType: "maintenance",
+    label: "Light out",
+    value: "Light fixture needs a new bulb",
+    icon: "bulb-outline",
+  },
+  {
+    id: "maint-hardware",
+    itemType: "maintenance",
+    label: "Loose hardware",
+    value: "Loose handle or hardware needs tightening",
+    icon: "hammer-outline",
+  },
+  {
+    id: "task-air-filter",
+    itemType: "task",
+    label: "Replace air filter",
+    value: "Replace HVAC air filter",
+    icon: "swap-horizontal-outline",
+  },
+  {
+    id: "task-smoke",
+    itemType: "task",
+    label: "Check detectors",
+    value: "Check smoke and CO detectors",
+    icon: "shield-checkmark-outline",
+  },
+  {
+    id: "task-staging",
+    itemType: "task",
+    label: "Reset staging",
+    value: "Reset room staging before guest arrival",
+    icon: "color-wand-outline",
+  },
+  {
+    id: "task-touchup",
+    itemType: "task",
+    label: "Touch-point clean",
+    value: "Do a touch-point clean in this room",
+    icon: "sparkles-outline",
+  },
+  {
+    id: "task-outdoor",
+    itemType: "task",
+    label: "Reset outdoor setup",
+    value: "Reset patio and outdoor seating setup",
+    icon: "sunny-outline",
+    roomKeywords: ["patio", "deck", "balcony", "outdoor"],
+  },
+];
+
+function stripRestockQuantitySuffix(description: string): string {
+  return description.replace(/\s*\(qty:\s*\d+\)\s*$/i, "").trim();
+}
+
+function buildItemDescription(text: string, itemType: AddItemType, quantity: number): string {
+  if (itemType === "restock" && quantity > 1) {
+    return `${text} (qty: ${quantity})`;
+  }
+  return text;
+}
+
+function getItemTypeAccent(itemType: AddItemType | undefined): string {
+  switch (itemType) {
+    case "restock":
+      return colors.success;
+    case "maintenance":
+      return colors.warning;
+    case "task":
+      return colors.primary;
+    case "note":
+    default:
+      return colors.muted;
+  }
+}
+
+function getItemTypeIcon(itemType: AddItemType | undefined): keyof typeof Ionicons.glyphMap {
+  switch (itemType) {
+    case "restock":
+      return "cart-outline";
+    case "maintenance":
+      return "construct-outline";
+    case "task":
+      return "checkbox-outline";
+    case "note":
+    default:
+      return "document-text-outline";
+  }
+}
+
+function getQuickAddTemplates(itemType: AddItemType, roomName?: string | null): QuickAddTemplate[] {
+  const normalizedRoom = roomName?.toLowerCase() || "";
+  return QUICK_ADD_TEMPLATES.filter((template) => {
+    if (template.itemType !== itemType) return false;
+    if (!template.roomKeywords?.length) return true;
+    return template.roomKeywords.some((keyword) => normalizedRoom.includes(keyword));
+  });
+}
+
 export default function InspectionCameraScreen() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<CameraRoute>();
   const { inspectionId, propertyId, inspectionMode } = route.params;
+  const insets = useSafeAreaInsets();
   const activeImageSource: ImageSourceType = route.params.imageSource || "camera";
   const activeImageSourceLabel =
     activeImageSource === "camera"
@@ -212,6 +371,7 @@ export default function InspectionCameraScreen() {
         : "OpenGlass";
 
   const [permission, requestPermission, getPermission] = useCameraPermissions();
+  const [microphonePermission, requestMicrophonePermission] = useMicrophonePermissions();
   const [paused, setPaused] = useState(false);
   const [currentRoom, setCurrentRoom] = useState<string | null>(null);
   const [findings, setFindings] = useState<Finding[]>([]);
@@ -223,13 +383,28 @@ export default function InspectionCameraScreen() {
   const [autoCaptureEnabled, setAutoCaptureEnabled] = useState(true);
   const [showNoteModal, setShowNoteModal] = useState(false);
   const [showNotesLogModal, setShowNotesLogModal] = useState(false);
+  const [addItemType, setAddItemType] = useState<"note" | "restock" | "maintenance" | "task">("note");
+  const [addItemQuantity, setAddItemQuantity] = useState(1);
+  const [supplyCatalog, setSupplyCatalog] = useState<SupplyItem[]>([]);
+  const [selectedSupplyItem, setSelectedSupplyItem] = useState<SupplyItem | null>(null);
+  const [showSupplyPicker, setShowSupplyPicker] = useState(true);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [noteText, setNoteText] = useState("");
+  const [editingFindingId, setEditingFindingId] = useState<string | null>(null);
+  const [returnToItemsLogOnClose, setReturnToItemsLogOnClose] = useState(false);
+  // Legacy pendingItemAttachment/existingItemMedia removed — AddItemComposer manages evidence state
+  const [isSavingItem, setIsSavingItem] = useState(false);
+  const [composerInitialValues, setComposerInitialValues] = useState<ComposerInitialValues | undefined>(undefined);
+  const [isRecordingEvidence, setIsRecordingEvidence] = useState(false);
+  const [evidenceRecordingSeconds, setEvidenceRecordingSeconds] = useState(0);
+  const evidenceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [expandedItemIds, setExpandedItemIds] = useState<string[]>([]);
   const [submissionStatus, setSubmissionStatus] = useState<string | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
   const [bottomControlsHeight, setBottomControlsHeight] = useState(0);
   const voiceRecorderRef = useRef<VoiceNoteRecorder | null>(null);
+  const evidenceRecordingCancelledRef = useRef(false);
   const yoloModelRef = useRef<YoloModelLoader | null>(null);
   const itemTrackerRef = useRef<ItemTracker | null>(null);
   const yoloTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -258,6 +433,7 @@ export default function InspectionCameraScreen() {
   /** Tracks baselines where AI found issues */
   const issueBaselinesRef = useRef<Set<string>>(new Set());
   const cameraRef = useRef<CameraView>(null);
+  const isRecordingEvidenceRef = useRef(false);
   const baseZoomRef = useRef(0);
 
   // ── Pinch-to-Zoom Gesture ──
@@ -381,14 +557,72 @@ export default function InspectionCameraScreen() {
   const processingTimeoutIdRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const voiceNotesAvailable = getVoiceNotesCapability().supported;
 
+  // Legacy resetAddItemComposer removed — AddItemComposer manages its own state
+
   const closeNoteModal = useCallback(() => {
+    Keyboard.dismiss();
     if (voiceRecorderRef.current?.isRecording || isRecordingVoice) {
       setIsRecordingVoice(false);
       void voiceRecorderRef.current?.cancelRecording();
     }
-    setNoteText("");
+    if (isRecordingEvidenceRef.current) {
+      evidenceRecordingCancelledRef.current = true;
+      try {
+        cameraRef.current?.stopRecording?.();
+      } catch {
+        // Ignore stop errors when the camera is already idle.
+      }
+    }
+    const reopenItemsLog = returnToItemsLogOnClose;
     setShowNoteModal(false);
-  }, [isRecordingVoice]);
+    setEditingFindingId(null);
+    setComposerInitialValues(undefined);
+    setReturnToItemsLogOnClose(false);
+    if (reopenItemsLog) {
+      setShowNotesLogModal(true);
+    }
+  }, [isRecordingVoice, returnToItemsLogOnClose]);
+
+  const openAddItemComposer = useCallback((options?: {
+    item?: Finding;
+    returnToLog?: boolean;
+    defaultType?: AddItemType;
+  }) => {
+    const item = options?.item;
+    Keyboard.dismiss();
+    setShowNotesLogModal(false);
+    setReturnToItemsLogOnClose(Boolean(options?.returnToLog));
+
+    if (item) {
+      const resolvedItemType: AddItemType =
+        item.itemType ||
+        (item.category === "restock"
+          ? "restock"
+          : item.category === "operational"
+            ? "maintenance"
+            : "note");
+      setEditingFindingId(item.id);
+      setComposerInitialValues({
+        id: item.id,
+        itemType: resolvedItemType,
+        description: resolvedItemType === "restock"
+          ? stripRestockQuantitySuffix(item.description)
+          : item.description,
+        quantity: item.restockQuantity || 1,
+        supplyItemId: item.supplyItemId,
+        imageUrl: item.imageUrl,
+        videoUrl: item.videoUrl,
+        evidenceItems: item.evidenceItems,
+      });
+    } else {
+      setEditingFindingId(null);
+      setComposerInitialValues({
+        itemType: options?.defaultType || "note",
+      });
+    }
+
+    setShowNoteModal(true);
+  }, []);
 
   const runYoloDetectionTick = useCallback(async () => {
     if (!isMountedRef.current || pausedRef.current || isCapturingRef.current) return;
@@ -545,6 +779,130 @@ export default function InspectionCameraScreen() {
       setCaptureHint(null);
       captureHintTimerRef.current = null;
     }, 4500);
+  }, []);
+
+  // Legacy handleRemoveItemAttachment removed — AddItemComposer handles its own evidence
+
+  const handleCaptureEvidencePhoto = useCallback(async (): Promise<{ uri: string } | null> => {
+    if (!cameraRef.current || isSavingItem || isRecordingVoice || isRecordingEvidenceRef.current) {
+      return null;
+    }
+
+    Keyboard.dismiss();
+    try {
+      const photo = await cameraRef.current.takePictureAsync({
+        quality: 0.7,
+        base64: false,
+      });
+
+      if (!photo?.uri) {
+        throw new Error("No photo was captured");
+      }
+
+      showCaptureHint("Photo evidence attached");
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      return { uri: photo.uri };
+    } catch (err) {
+      reportError({
+        screen: "InspectionCamera",
+        action: "capture evidence photo",
+        errorMessage:
+          err instanceof Error ? err.message : "Evidence photo capture failed",
+        isAutomatic: true,
+      });
+      Alert.alert("Photo unavailable", "Could not capture a photo for this item. Please try again.");
+      return null;
+    }
+  }, [isRecordingVoice, isSavingItem, showCaptureHint]);
+
+  const handleToggleEvidenceVideo = useCallback(async (): Promise<{ uri: string; durationMs?: number } | null> => {
+    if (!cameraRef.current || isSavingItem || isRecordingVoice) {
+      return null;
+    }
+
+    if (!microphonePermission?.granted) {
+      const result = await requestMicrophonePermission();
+      if (!result.granted) {
+        Alert.alert(
+          "Microphone Required",
+          "Microphone access is needed to attach a short video note.",
+          [
+            { text: "Cancel", style: "cancel" },
+            { text: "Open Settings", onPress: () => void Linking.openSettings() },
+          ],
+        );
+        return null;
+      }
+    }
+
+    Keyboard.dismiss();
+    evidenceRecordingCancelledRef.current = false;
+    isRecordingEvidenceRef.current = true;
+    setIsRecordingEvidence(true);
+    setEvidenceRecordingSeconds(0);
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+
+    // Start elapsed-time counter
+    evidenceTimerRef.current = setInterval(() => {
+      setEvidenceRecordingSeconds((s) => s + 1);
+    }, 1000);
+
+    try {
+      const result = await cameraRef.current.recordAsync({
+        maxDuration: 60,
+      });
+
+      if (result?.uri && !evidenceRecordingCancelledRef.current) {
+        showCaptureHint("Video evidence attached");
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        return { uri: result.uri };
+      }
+      return null;
+    } catch (err) {
+      if (!evidenceRecordingCancelledRef.current) {
+        reportError({
+          screen: "InspectionCamera",
+          action: "record evidence video",
+          errorMessage:
+            err instanceof Error ? err.message : "Evidence video capture failed",
+          isAutomatic: true,
+        });
+        Alert.alert("Video unavailable", "Could not capture a video for this item. Please try again.");
+      }
+      return null;
+    } finally {
+      if (evidenceTimerRef.current) {
+        clearInterval(evidenceTimerRef.current);
+        evidenceTimerRef.current = null;
+      }
+      isRecordingEvidenceRef.current = false;
+      evidenceRecordingCancelledRef.current = false;
+      setIsRecordingEvidence(false);
+      setEvidenceRecordingSeconds(0);
+    }
+  }, [
+    isRecordingVoice,
+    isSavingItem,
+    microphonePermission,
+    requestMicrophonePermission,
+    showCaptureHint,
+  ]);
+
+  const handleStopEvidenceVideo = useCallback(() => {
+    evidenceRecordingCancelledRef.current = false;
+    try {
+      cameraRef.current?.stopRecording?.();
+    } catch {
+      // Ignore if recording already stopped.
+    }
+  }, []);
+
+  const toggleExpandedItem = useCallback((findingId: string) => {
+    setExpandedItemIds((prev) =>
+      prev.includes(findingId)
+        ? prev.filter((id) => id !== findingId)
+        : [...prev, findingId],
+    );
   }, []);
 
   const getBaselineById = useCallback((baselineId: string) => {
@@ -856,14 +1214,13 @@ export default function InspectionCameraScreen() {
       const remainingAngles = roomCov ? roomCov.total - roomCov.scanned : null;
       if (remainingAngles === 0) {
         showCaptureHint("✓ Room coverage complete!");
-        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       } else if (remainingAngles === 1) {
-        // Still 1 left — the final target wasn't the one just verified
         showCaptureHint("Saved for analysis — still need final view");
-        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       } else {
         showCaptureHint("✓ Captured (analyzing...)");
-        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       }
     });
 
@@ -1215,6 +1572,11 @@ export default function InspectionCameraScreen() {
     // Load baselines (also populates known conditions from the same response)
     loadBaselines(session);
 
+    // Pre-fetch supply catalog for restock item matching
+    getPropertySupplies(propertyId)
+      .then((items: SupplyItem[]) => setSupplyCatalog(Array.isArray(items) ? items : []))
+      .catch(() => setSupplyCatalog([]));
+
     if (activeImageSource !== "camera") {
       showCaptureHint(
         `${activeImageSource === "frame" ? "Frame" : "OpenGlass"} source selected. Phone camera remains fallback for detailed captures.`,
@@ -1287,6 +1649,10 @@ export default function InspectionCameraScreen() {
       batchAnalyzerRef.current = null;
       voiceRecorderRef.current?.dispose();
       voiceRecorderRef.current = null;
+      if (evidenceTimerRef.current) {
+        clearInterval(evidenceTimerRef.current);
+        evidenceTimerRef.current = null;
+      }
       stopYoloLoop();
       yoloModelRef.current?.dispose();
       yoloModelRef.current = null;
@@ -1307,6 +1673,16 @@ export default function InspectionCameraScreen() {
         if (voiceRecorderRef.current?.isRecording) {
           setIsRecordingVoice(false);
           void voiceRecorderRef.current?.cancelRecording();
+        }
+        if (isRecordingEvidenceRef.current) {
+          evidenceRecordingCancelledRef.current = true;
+          try {
+            cameraRef.current?.stopRecording?.();
+          } catch {
+            // Ignore stop errors when the camera is already idle.
+          }
+          isRecordingEvidenceRef.current = false;
+          setIsRecordingEvidence(false);
         }
         if (yoloLoadTimerRef.current) {
           clearTimeout(yoloLoadTimerRef.current);
@@ -1785,7 +2161,13 @@ export default function InspectionCameraScreen() {
         });
       } catch (err) {
         setIsInitializing(false);
-        console.error("Failed to load baselines:", err);
+        reportError({
+          screen: "InspectionCamera",
+          action: "load inspection baselines",
+          errorMessage:
+            err instanceof Error ? err.message : "Failed to load baselines",
+          isAutomatic: true,
+        });
         Alert.alert(
           "Failed to load baselines",
           "Could not load inspection data. Check your connection and try again.",
@@ -2017,7 +2399,7 @@ export default function InspectionCameraScreen() {
 
                   if (isRoomComplete) {
                     showCaptureHint("Room coverage complete ✓");
-                    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                   } else if (isLastAngle) {
                     // Get the remaining angle's label for the hint
                     const remainingBaselines = (baselinesRef.current.find(r => r.roomId === bRoomId)?.baselines || [])
@@ -2026,10 +2408,10 @@ export default function InspectionCameraScreen() {
                       ? getInspectionDisplayLabel({ label: remainingBaselines[0].label, roomName: locked.baseline.roomName, metadata: remainingBaselines[0].metadata })
                       : "1 view";
                     showCaptureHint(`${displayLabel} captured — still need: ${remainingLabel}`);
-                    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                   } else if (isHalfway) {
                     showCaptureHint(`${displayLabel} captured — halfway there (${scannedCount}/${totalAngles})`);
-                    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                   } else {
                     showCaptureHint(`${displayLabel} captured (${scannedCount}/${totalAngles})`);
                     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -2532,6 +2914,49 @@ export default function InspectionCameraScreen() {
     });
   }, [showCaptureHint]);
 
+  const getQueuedSubmitAlertCopy = useCallback((error: unknown) => {
+    const status = error instanceof ApiError ? error.status : undefined;
+    const message = error instanceof Error ? error.message : "";
+
+    if (status === 401) {
+      return {
+        title: "Saved locally — sign in required",
+        message:
+          "Inspection results were saved on this device, but your session needs attention before they can sync. Sign in again and Atria will retry automatically.",
+      };
+    }
+
+    if (status && status >= 500) {
+      return {
+        title: "Server busy — saved locally",
+        message:
+          "Inspection results were saved on this device, but the server did not finish processing them right now. Atria will retry automatically.",
+      };
+    }
+
+    if (/timed out/i.test(message)) {
+      return {
+        title: "Sync took too long — saved locally",
+        message:
+          "Inspection results were saved on this device, but the upload took longer than expected. Atria will retry automatically in the background.",
+      };
+    }
+
+    if (/network/i.test(message)) {
+      return {
+        title: "Connection issue — saved locally",
+        message:
+          "Inspection results were saved on this device. Atria could not reach the server just now and will retry automatically when the connection is stable.",
+      };
+    }
+
+    return {
+      title: "Saved locally",
+      message:
+        "Inspection results were saved on this device and will retry syncing automatically.",
+    };
+  }, []);
+
   const handleEndInspection = useCallback(async () => {
     if (isSubmittingRef.current) return;
     isSubmittingRef.current = true;
@@ -2563,6 +2988,11 @@ export default function InspectionCameraScreen() {
     if (yoloTimerRef.current) {
       clearInterval(yoloTimerRef.current);
       yoloTimerRef.current = null;
+    }
+    // Stop evidence recording timer
+    if (evidenceTimerRef.current) {
+      clearInterval(evidenceTimerRef.current);
+      evidenceTimerRef.current = null;
     }
 
     // Telemetry: log stubborn uncaptured baselines for future optimization
@@ -2668,6 +3098,11 @@ export default function InspectionCameraScreen() {
         category: string;
         isClaimable: boolean;
         source: "manual_note" | "ai";
+        itemType?: AddItemType;
+        restockQuantity?: number;
+        supplyItemId?: string;
+        imageUrl?: string;
+        videoUrl?: string;
       }>;
     }> = [];
 
@@ -2701,7 +3136,12 @@ export default function InspectionCameraScreen() {
             confidence: f.confidence,
             category: f.category,
             isClaimable: f.isClaimable || false,
-            source: (f.category === "manual_note" ? "manual_note" : "ai") as "manual_note" | "ai",
+            source: resolveFindingSource(f),
+            itemType: f.itemType,
+            restockQuantity: f.restockQuantity,
+            supplyItemId: f.supplyItemId,
+            imageUrl: f.imageUrl,
+            videoUrl: f.videoUrl,
           }));
 
       const scannedBaselineIds = Array.from(visit.anglesScanned);
@@ -2769,26 +3209,69 @@ export default function InspectionCameraScreen() {
           baselineImageId: r.baselineImageId,
         }));
       }
-    } catch (err) {
-      console.error("Failed to submit results:", err);
-      try {
-        await enqueueBulkSubmission({
-          inspectionId,
-          results,
-          completionTier: getEffectiveCompletionTier(session),
-          events: eventLog,
-          effectiveCoverage: effectiveCoverageData,
-        });
-        Alert.alert(
-          "Saved for sync",
-          "Inspection ended and results were saved on-device. They will auto-sync when your connection is available.",
-        );
-      } catch {
-        setSubmissionStatus(null); // Clear stuck overlay on double-failure
-        Alert.alert(
-          "Sync warning",
-          "Inspection ended, but we could not sync or queue results on this device.",
-        );
+    } catch (firstErr) {
+      reportError({
+        screen: "InspectionCamera",
+        action: "submit inspection results",
+        errorMessage:
+          firstErr instanceof Error ? firstErr.message : "Failed to submit inspection results",
+        isAutomatic: true,
+      });
+
+      // Immediate retry: if network looks reachable, try once more before queueing
+      let retrySucceeded = false;
+      const isAuthError = firstErr instanceof ApiError && firstErr.status === 401;
+      if (!isAuthError) {
+        try {
+          setSubmissionStatus("Retrying...");
+          const probe = new AbortController();
+          const probeTimer = setTimeout(() => probe.abort(), 4000);
+          await fetch("https://clients3.google.com/generate_204", {
+            method: "HEAD",
+            signal: probe.signal,
+          });
+          clearTimeout(probeTimer);
+
+          // Network is reachable — retry the submit
+          const retryResponse = await submitBulkResults(
+            inspectionId,
+            results,
+            getEffectiveCompletionTier(session),
+            undefined,
+            eventLog,
+            effectiveCoverageData,
+          );
+          if (retryResponse?.results && Array.isArray(retryResponse.results)) {
+            serverResultIds = retryResponse.results.map((r: { id: string; roomId: string; baselineImageId: string }) => ({
+              id: r.id,
+              roomId: r.roomId,
+              baselineImageId: r.baselineImageId,
+            }));
+          }
+          retrySucceeded = true;
+        } catch {
+          // Retry also failed — fall through to queue
+        }
+      }
+
+      if (!retrySucceeded) {
+        try {
+          await enqueueBulkSubmission({
+            inspectionId,
+            results,
+            completionTier: getEffectiveCompletionTier(session),
+            events: eventLog,
+            effectiveCoverage: effectiveCoverageData,
+          });
+          const copy = getQueuedSubmitAlertCopy(firstErr);
+          Alert.alert(copy.title, copy.message);
+        } catch {
+          setSubmissionStatus(null); // Clear stuck overlay on double-failure
+          Alert.alert(
+            "Sync warning",
+            "Inspection ended, but we could not sync or queue results on this device.",
+          );
+        }
       }
     }
 
@@ -2802,20 +3285,32 @@ export default function InspectionCameraScreen() {
 
       // Map server result IDs to findings for note deletion support
       const roomResultId = serverResultIds.find(r => r.roomId === roomId)?.id;
-      const roomFindings: SummaryFindingData[] = visit.findings.map((f) => ({
-        id: f.id,
-        description: f.description,
-        severity: f.severity,
-        confidence: f.confidence,
-        category: f.category,
-        status: f.status,
-        roomName: visit.roomName,
-        source: f.category === "manual_note" ? "manual_note" : "ai",
-        resultId: roomResultId,
-      }));
+      // Look up component-state findings to get itemType metadata
+      const componentFindings = findings;
+      const roomFindings: SummaryFindingData[] = visit.findings.map((f) => {
+        const componentFinding = componentFindings.find((cf) => cf.id === f.id);
+        return {
+          id: f.id,
+          description: f.description,
+          severity: f.severity,
+          confidence: f.confidence,
+          category: f.category,
+          status: f.status,
+          roomName: visit.roomName,
+          source: resolveFindingSource(componentFinding ?? f),
+          resultId: roomResultId,
+          itemType: componentFinding?.itemType,
+          restockQuantity: componentFinding?.restockQuantity,
+          supplyItemId: componentFinding?.supplyItemId,
+          imageUrl: componentFinding?.imageUrl,
+          videoUrl: componentFinding?.videoUrl,
+          evidenceItems: componentFinding?.evidenceItems,
+        };
+      });
 
       const confirmed = visit.findings.filter((f) => f.status === "confirmed");
       for (const cf of confirmed) {
+        const componentFinding = componentFindings.find((f) => f.id === cf.id);
         allConfirmed.push({
           id: cf.id,
           description: cf.description,
@@ -2824,8 +3319,14 @@ export default function InspectionCameraScreen() {
           category: cf.category,
           roomName: visit.roomName,
           status: cf.status,
-          source: cf.category === "manual_note" ? "manual_note" : "ai",
+          source: resolveFindingSource(componentFinding ?? cf),
           resultId: roomResultId,
+          itemType: componentFinding?.itemType,
+          restockQuantity: componentFinding?.restockQuantity,
+          supplyItemId: componentFinding?.supplyItemId,
+          imageUrl: componentFinding?.imageUrl,
+          videoUrl: componentFinding?.videoUrl,
+          evidenceItems: componentFinding?.evidenceItems,
         });
       }
 
@@ -2833,6 +3334,7 @@ export default function InspectionCameraScreen() {
       summaryRooms.push({
         roomId,
         roomName: visit.roomName,
+        resultId: roomResultId,
         score: visit.bestScore,
         coverage:
           roomProgress
@@ -2858,6 +3360,7 @@ export default function InspectionCameraScreen() {
       confirmedFindings: allConfirmed,
     };
 
+    setSubmissionStatus(null);
     navigation.replace("InspectionSummary", {
       inspectionId,
       propertyId,
@@ -2873,12 +3376,18 @@ export default function InspectionCameraScreen() {
     inspectionMode,
     getEffectiveCompletionTier,
     getEffectiveOverallCoverage,
+    getQueuedSubmitAlertCopy,
     showCaptureHint,
   ]);
 
   // Intercept Android hardware back button to prevent data loss
   useEffect(() => {
     const onBackPress = () => {
+      // Close the Add Item overlay first if it's open
+      if (showNoteModal) {
+        closeNoteModal();
+        return true;
+      }
       Alert.alert(
         "End Inspection",
         "Are you sure you want to end this inspection?",
@@ -2895,7 +3404,7 @@ export default function InspectionCameraScreen() {
     };
     const sub = BackHandler.addEventListener("hardwareBackPress", onBackPress);
     return () => sub.remove();
-  }, [handleEndInspection]);
+  }, [handleEndInspection, showNoteModal, closeNoteModal]);
 
   // Manual capture trigger
   const handleManualCapture = useCallback(async () => {
@@ -3231,9 +3740,21 @@ export default function InspectionCameraScreen() {
     }
 
     setFindings((prev) => prev.filter((f) => f.id !== findingId));
-    showCaptureHint("Finding confirmed");
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    showCaptureHint("Finding confirmed ✓");
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
   }, [showCaptureHint, propertyId, inspectionId]);
+
+  const handleAcceptSuggestionAsItem = useCallback((findingId: string, itemType: AddItemType) => {
+    const finding = findings.find((f) => f.id === findingId);
+    if (!finding) return;
+    // Confirm the AI finding first
+    sessionRef.current?.updateFindingStatus(findingId, "confirmed");
+    setFindings((prev) => prev.filter((f) => f.id !== findingId));
+    // Open composer pre-filled with the suggestion
+    openAddItemComposer({
+      item: { ...finding, itemType } as Finding,
+    });
+  }, [findings, openAddItemComposer]);
 
   const handleDismissFinding = useCallback((findingId: string, reason?: DismissReason) => {
     const session = sessionRef.current;
@@ -3286,54 +3807,188 @@ export default function InspectionCameraScreen() {
     showCaptureHint(hint);
   }, [showCaptureHint]);
 
-  const handleAddNote = useCallback(() => {
-    setShowNoteModal(true);
-  }, []);
+  const handleAddNote = useCallback((source: "camera" | "item_log" = "camera") => {
+    openAddItemComposer({
+      returnToLog: source === "item_log",
+      defaultType: "note",
+    });
+  }, [openAddItemComposer]);
 
-  const handleSubmitNote = useCallback(() => {
+  const handleEditItem = useCallback((item: Finding) => {
+    openAddItemComposer({
+      item,
+      returnToLog: true,
+    });
+  }, [openAddItemComposer]);
+
+  const handleCameraComposerSubmit = useCallback(async (result: ComposerResult) => {
     const session = sessionRef.current;
-    const text = noteText.trim();
-    if (!session || !text || isRecordingVoice) return;
-
+    if (!session) return;
     const state = session.getState();
     const roomId = state.currentRoomId;
     if (!roomId) return;
 
-    // Add as a manual finding
-    const findingId = session.addFinding(roomId, {
-      description: text,
-      severity: "maintenance",
-      confidence: 1.0,
-      category: "manual_note",
-      findingCategory: "condition",
-      isClaimable: false,
-    });
+    const typeConfig = {
+      note: { category: "manual_note" as const, findingCategory: "condition" as const, severity: "maintenance" as const },
+      restock: { category: "restock" as const, findingCategory: "restock" as const, severity: "cosmetic" as const },
+      maintenance: { category: "operational" as const, findingCategory: "condition" as const, severity: "maintenance" as const },
+      task: { category: "manual_note" as const, findingCategory: "condition" as const, severity: "cosmetic" as const },
+    };
 
-    setFindings((prev) => [
-      ...prev,
-      {
-        id: findingId,
-        description: text,
-        severity: "maintenance",
+    const config = typeConfig[result.itemType];
+
+    setIsSavingItem(true);
+    try {
+      const evidenceItems = [...(result.existingEvidence || [])];
+      let imageUrl = evidenceItems.find((e) => e.kind === "photo")?.url;
+      let videoUrl = evidenceItems.find((e) => e.kind === "video")?.url;
+
+      for (const [index, att] of result.attachments.entries()) {
+        const timestamp = Date.now();
+        if (att.kind === "photo") {
+          const upload = await uploadImageFile(
+            att.localUri,
+            propertyId,
+            `inspection-item-${timestamp}-${index + 1}.jpg`,
+          );
+          if (!imageUrl) {
+            imageUrl = upload.fileUrl;
+          }
+          evidenceItems.push({
+            id: `photo-${timestamp}-${index + 1}`,
+            kind: "photo",
+            url: upload.fileUrl,
+            uploadState: "uploaded",
+            createdAt: new Date().toISOString(),
+          });
+        } else if (att.kind === "video") {
+          const upload = await uploadVideoFile(
+            att.localUri,
+            propertyId,
+            `inspection-item-${timestamp}-${index + 1}.mp4`,
+          );
+          if (!videoUrl) {
+            videoUrl = upload.fileUrl;
+          }
+          evidenceItems.push({
+            id: `video-${timestamp}-${index + 1}`,
+            kind: "video",
+            url: upload.fileUrl,
+            uploadState: "uploaded",
+            createdAt: new Date().toISOString(),
+          });
+        }
+      }
+
+      // Clean up local files
+      for (const att of result.attachments) {
+        FileSystem.deleteAsync(att.localUri, { idempotent: true }).catch(() => {});
+      }
+
+      const findingPayload = {
+        description: result.description,
+        severity: config.severity,
         confidence: 1.0,
-        category: "manual_note",
-        status: "confirmed",
-      },
-    ]);
+        category: config.category,
+        source: "manual_note" as const,
+        findingCategory: config.findingCategory,
+        isClaimable: false,
+        objectClass: result.itemType === "restock" ? "consumable" : undefined,
+        itemType: result.itemType,
+        restockQuantity: result.itemType === "restock" ? result.quantity : undefined,
+        supplyItemId: result.supplyItem?.id,
+        imageUrl,
+        videoUrl,
+        evidenceItems: evidenceItems.length > 0 ? evidenceItems : undefined,
+      };
 
-    // Auto-confirm manual notes
-    session.updateFindingStatus(findingId, "confirmed");
+      if (editingFindingId) {
+        session.updateFindingDetails(editingFindingId, findingPayload);
+        setFindings((prev) =>
+          prev.map((finding) =>
+            finding.id === editingFindingId
+              ? {
+                  ...finding,
+                  ...findingPayload,
+                  status: "confirmed",
+                  roomName: finding.roomName || currentRoom || undefined,
+                }
+              : finding,
+          ),
+        );
+      } else {
+        const findingId = session.addFinding(roomId, findingPayload);
+        setFindings((prev) => [
+          ...prev,
+          {
+            id: findingId,
+            description: result.description,
+            severity: config.severity,
+            confidence: 1.0,
+            category: config.category,
+            status: "confirmed",
+            roomName: currentRoom || undefined,
+            itemType: result.itemType,
+            restockQuantity: result.itemType === "restock" ? result.quantity : undefined,
+            supplyItemId: result.supplyItem?.id,
+            imageUrl,
+            videoUrl,
+            evidenceItems: evidenceItems.length > 0 ? evidenceItems : undefined,
+            source: "manual_note",
+          },
+        ]);
+        session.updateFindingStatus(findingId, "confirmed");
+      }
 
-    setNoteText("");
-    setShowNoteModal(false);
-    showCaptureHint("Note added");
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-  }, [isRecordingVoice, noteText, showCaptureHint]);
+      Keyboard.dismiss();
+      const reopenItemsLog = returnToItemsLogOnClose;
+      const hintMessages = {
+        note: editingFindingId ? "Note updated" : "Note added",
+        restock: editingFindingId ? "Restock item updated" : "Restock item added",
+        maintenance: editingFindingId ? "Maintenance item updated" : "Maintenance item added",
+        task: editingFindingId ? "Task updated" : "Task added",
+      };
+
+      setShowNoteModal(false);
+      setEditingFindingId(null);
+      setComposerInitialValues(undefined);
+      setReturnToItemsLogOnClose(false);
+      if (reopenItemsLog) {
+        setShowNotesLogModal(true);
+      }
+      showCaptureHint(hintMessages[result.itemType]);
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (err) {
+      // Clean up local attachment files on error to prevent temp file leaks
+      for (const att of result.attachments) {
+        FileSystem.deleteAsync(att.localUri, { idempotent: true }).catch(() => {});
+      }
+      reportError({
+        screen: "InspectionCamera",
+        action: "save inspection item",
+        errorMessage:
+          err instanceof Error ? err.message : "Saving inspection item failed",
+        isAutomatic: true,
+      });
+      Alert.alert(
+        "Could not save item",
+        err instanceof Error ? err.message : "Please try again.",
+      );
+    } finally {
+      setIsSavingItem(false);
+    }
+  }, [
+    currentRoom,
+    editingFindingId,
+    propertyId,
+    returnToItemsLogOnClose,
+    showCaptureHint,
+  ]);
 
   const handleDeleteNote = useCallback((findingId: string) => {
     Alert.alert(
-      "Delete this note?",
-      "This will permanently remove the note from this inspection.",
+      "Delete this item?",
+      "This will permanently remove the item from this inspection.",
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -3342,7 +3997,8 @@ export default function InspectionCameraScreen() {
           onPress: () => {
             sessionRef.current?.updateFindingStatus(findingId, "dismissed");
             setFindings((prev) => prev.filter((f) => f.id !== findingId));
-            showCaptureHint("Note removed");
+            setExpandedItemIds((prev) => prev.filter((id) => id !== findingId));
+            showCaptureHint("Item removed");
             void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           },
         },
@@ -3356,12 +4012,42 @@ export default function InspectionCameraScreen() {
     }
   }, [permission, requestPermission]);
 
+  const manualItems = findings.filter(
+    (finding) => finding.status === "confirmed" && (finding.itemType || finding.category === "manual_note"),
+  );
+  const groupedManualItems = useMemo(() => {
+    const groups = new Map<AddItemType, Finding[]>();
+    for (const item of manualItems) {
+      const resolvedType: AddItemType =
+        item.itemType ||
+        (item.category === "restock"
+          ? "restock"
+          : item.category === "operational"
+            ? "maintenance"
+            : "note");
+      const existing = groups.get(resolvedType) || [];
+      existing.push(item);
+      groups.set(resolvedType, existing);
+    }
+
+    return (["restock", "maintenance", "task", "note"] as AddItemType[])
+      .map((itemType) => ({
+        itemType,
+        items: groups.get(itemType) || [],
+      }))
+      .filter((group) => group.items.length > 0);
+  }, [manualItems]);
+  const quickAddTemplates = useMemo(
+    () => getQuickAddTemplates(addItemType, currentRoom),
+    [addItemType, currentRoom],
+  );
+
   if (!permission?.granted) {
     const canAsk = permission?.canAskAgain !== false;
     return (
       <View style={styles.permissionContainer}>
         <Text style={styles.permissionText}>Camera access is required</Text>
-        <Text style={[styles.permissionText, { fontSize: 14, marginBottom: 16, opacity: 0.7 }]}>
+        <Text style={[styles.permissionText, { fontSize: 14, marginBottom: spacing.md, opacity: 0.7 }]}>
           {canAsk
             ? "Tap below to grant camera access."
             : "Camera permission was denied. Please enable it in Settings."}
@@ -3377,10 +4063,8 @@ export default function InspectionCameraScreen() {
       </View>
     );
   }
-
-  const manualNotes = findings.filter(
-    (finding) => finding.category === "manual_note" && finding.status === "confirmed",
-  );
+  // Keep backward compat: manualNotes is used for button label / notes log
+  const manualNotes = manualItems;
   const roomModeLabel = isAutoDetect
     ? "Auto-detect"
     : autoDetectUnavailableReason
@@ -3451,7 +4135,7 @@ export default function InspectionCameraScreen() {
                 {
                   borderColor,
                   borderWidth: isGreen ? 5 : 4,
-                  borderRadius: 2,
+                  borderRadius: radius.xxs,
                   shadowColor: borderColor,
                   shadowRadius: 8,
                   shadowOpacity: 0.6,
@@ -3621,18 +4305,33 @@ export default function InspectionCameraScreen() {
           </View>
         </SafeAreaView>
 
-        {/* Pause overlay */}
+        {/* Pause state */}
         {paused && (
-          <TouchableOpacity
-            style={styles.pauseOverlay}
-            onPress={handlePause}
-            activeOpacity={1}
-            accessibilityRole="button"
-            accessibilityLabel="Resume inspection"
+          <View
+            pointerEvents="box-none"
+            style={styles.pauseBannerContainer}
           >
-            <Text style={styles.pauseText}>PAUSED</Text>
-            <Text style={styles.pauseSubtext}>Tap anywhere to resume</Text>
-          </TouchableOpacity>
+            <View style={styles.pauseBanner}>
+              <View style={styles.pauseBadge}>
+                <Ionicons name="pause" size={16} color={colors.warning} />
+              </View>
+              <View style={styles.pauseCopy}>
+                <Text style={styles.pauseBannerTitle}>Inspection paused</Text>
+                <Text style={styles.pauseBannerText}>
+                  Capture is paused, but you can still add items, review findings, and change settings.
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.pauseResumeButton}
+                onPress={handlePause}
+                activeOpacity={0.8}
+                accessibilityRole="button"
+                accessibilityLabel="Resume inspection"
+              >
+                <Text style={styles.pauseResumeText}>Resume</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         )}
 
         {/* Bottom controls */}
@@ -3646,7 +4345,20 @@ export default function InspectionCameraScreen() {
             );
           }}
         >
-          {bottomPrompt && (
+          {/* AI Action Prompt Card — shows for single latest suggestion */}
+          {suggestedFindings.length === 1 && (
+            <AISuggestionCard
+              description={suggestedFindings[0].description}
+              suggestedItemType={inferItemType(suggestedFindings[0].description)}
+              confidence={suggestedFindings[0].confidence}
+              onAccept={(itemType) =>
+                handleAcceptSuggestionAsItem(suggestedFindings[0].id, itemType)
+              }
+              onDismiss={() => handleDismissFinding(suggestedFindings[0].id, "not_accurate")}
+            />
+          )}
+
+          {bottomPrompt && suggestedFindings.length !== 1 && (
             <View style={styles.captureHintBubble}>
               <Text style={styles.captureHintText} numberOfLines={2}>
                 {bottomPrompt}
@@ -3663,7 +4375,7 @@ export default function InspectionCameraScreen() {
               accessibilityRole="button"
               accessibilityLabel="Inspection settings"
             >
-              <Ionicons name="settings-outline" size={20} color="rgba(255,255,255,0.8)" />
+              <Ionicons name="settings-outline" size={20} color={colors.camera.textMedium} />
               <Text style={styles.utilityButtonText}>Settings</Text>
             </TouchableOpacity>
 
@@ -3694,18 +4406,18 @@ export default function InspectionCameraScreen() {
               activeOpacity={0.7}
               accessibilityRole="button"
               accessibilityLabel={
-                manualNotes.length > 0
-                  ? `${manualNotes.length} inspection note${manualNotes.length > 1 ? "s" : ""}`
-                  : "Add a note"
+                manualItems.length > 0
+                  ? `${manualItems.length} inspection item${manualItems.length > 1 ? "s" : ""}`
+                  : "Add an item"
               }
             >
               <Ionicons
-                name="document-text-outline"
+                name="add-circle-outline"
                 size={18}
-                color="rgba(255,255,255,0.8)"
+                color={colors.camera.textMedium}
               />
               <Text style={styles.utilityButtonText}>
-                {manualNotes.length > 0 ? `Notes (${manualNotes.length})` : "Add Note"}
+                {manualItems.length > 0 ? `Items (${manualItems.length})` : "Add Item"}
               </Text>
             </TouchableOpacity>
 
@@ -3720,7 +4432,7 @@ export default function InspectionCameraScreen() {
               <Ionicons
                 name={paused ? "play" : "pause"}
                 size={20}
-                color="rgba(255,255,255,0.8)"
+                color={colors.camera.textMedium}
               />
               <Text style={styles.utilityButtonText}>
                 {paused ? "Resume" : "Pause"}
@@ -3729,94 +4441,39 @@ export default function InspectionCameraScreen() {
           </View>
         </SafeAreaView>
 
-        {/* Voice/Note Modal */}
-        <Modal
+        {/* Add Item Composer — shared component replaces inline overlay */}
+        <AddItemComposer
           visible={showNoteModal}
-          transparent
-          animationType="slide"
-          onRequestClose={closeNoteModal}
-        >
-          <KeyboardAvoidingView
-            behavior={Platform.OS === "ios" ? "padding" : "height"}
-            style={styles.noteModalOverlay}
-          >
-            <View style={styles.noteModalContent}>
-              <Text style={styles.noteModalTitle}>Add Note</Text>
-              <Text style={styles.noteModalSubtitle}>
-                Describe the issue you see, or tap the mic to dictate
-              </Text>
-              {/* Voice note button */}
-              {voiceNotesAvailable && (
-                <TouchableOpacity
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: 8,
-                    paddingVertical: 10,
-                    paddingHorizontal: 16,
-                    borderRadius: 20,
-                    backgroundColor: isRecordingVoice ? "#DC2626" : "rgba(35,114,184,0.1)",
-                    alignSelf: "center",
-                    marginBottom: 8,
-                  }}
-                  onPress={async () => {
-                    const recorder = voiceRecorderRef.current;
-                    if (!recorder) return;
-                    if (isRecordingVoice) {
-                      setIsRecordingVoice(false);
-                      const result = await recorder.stopRecording();
-                      if (result?.transcript) {
-                        setNoteText((prev) => prev ? `${prev}\n${result.transcript}` : result.transcript);
-                      }
-                    } else {
-                      const started = await recorder.startRecording();
-                      if (started) setIsRecordingVoice(true);
-                    }
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons
-                    name={isRecordingVoice ? "stop-circle" : "mic"}
-                    size={20}
-                    color={isRecordingVoice ? "#fff" : "#2372B8"}
-                  />
-                  <Text style={{ color: isRecordingVoice ? "#fff" : "#2372B8", fontWeight: "600", fontSize: 14 }}>
-                    {isRecordingVoice ? "Stop Recording" : "Tap to Dictate"}
-                  </Text>
-                </TouchableOpacity>
-              )}
-              <TextInput
-                style={styles.noteInput}
-                placeholder="e.g. Water stain on ceiling near AC vent"
-                placeholderTextColor={colors.slate500}
-                value={noteText}
-                onChangeText={setNoteText}
-                multiline
-                autoFocus
-                maxLength={500}
-              />
-              <View style={styles.noteModalButtons}>
-                <TouchableOpacity
-                  style={styles.noteModalCancel}
-                  onPress={closeNoteModal}
-                >
-                  <Text style={styles.noteModalCancelText}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.noteModalSubmit,
-                    (!noteText.trim() || isRecordingVoice) && styles.noteModalSubmitDisabled,
-                  ]}
-                  onPress={handleSubmitNote}
-                  disabled={!noteText.trim() || isRecordingVoice}
-                >
-                  <Text style={styles.noteModalSubmitText}>Save Note</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </KeyboardAvoidingView>
-        </Modal>
+          isEditing={!!editingFindingId}
+          initialValues={composerInitialValues}
+          supplyCatalog={supplyCatalog}
+          canTakePhoto
+          canRecordVideo
+          canPickFromLibrary={false}
+          canDictate={voiceNotesAvailable}
+          onCapturePhoto={handleCaptureEvidencePhoto}
+          onCaptureVideo={handleToggleEvidenceVideo}
+          onStopVideoCapture={handleStopEvidenceVideo}
+          onStartDictation={async () => {
+            const recorder = voiceRecorderRef.current;
+            if (!recorder) return false;
+            const started = await recorder.startRecording();
+            if (started) setIsRecordingVoice(true);
+            return started;
+          }}
+          onStopDictation={async () => {
+            const recorder = voiceRecorderRef.current;
+            if (!recorder) return null;
+            setIsRecordingVoice(false);
+            const result = await recorder.stopRecording();
+            return result?.transcript ? { transcript: result.transcript } : null;
+          }}
+          isDictating={isRecordingVoice}
+          onSubmit={handleCameraComposerSubmit}
+          onCancel={closeNoteModal}
+          isSubmitting={isSavingItem}
+          roomName={currentRoom}
+        />
 
         <Modal
           visible={showNotesLogModal}
@@ -3826,46 +4483,149 @@ export default function InspectionCameraScreen() {
         >
           <View style={styles.noteModalOverlay}>
             <View style={styles.notesLogModalContent}>
-              <Text style={styles.noteModalTitle}>Inspection Notes</Text>
-              <Text style={styles.noteModalSubtitle}>
-                {manualNotes.length > 0
-                  ? "Review and manage your notes"
-                  : "Add notes about issues you see during the inspection"}
-              </Text>
-
-              <View style={styles.notesLogList}>
-                {manualNotes.length === 0 ? (
-                  <Text style={styles.notesLogEmptyText}>No notes yet</Text>
-                ) : (
-                  manualNotes.map((note) => (
-                    <View key={note.id} style={styles.noteListItem}>
-                      <Text style={styles.noteListText}>{note.description}</Text>
-                      <TouchableOpacity
-                        onPress={() => handleDeleteNote(note.id)}
-                        style={styles.noteDeleteButton}
-                      >
-                        <Text style={styles.noteDeleteButtonText}>Delete</Text>
-                      </TouchableOpacity>
-                    </View>
-                  ))
-                )}
+              <View style={styles.sheetHandle} />
+              <View style={styles.sheetHeader}>
+                <Text style={styles.noteModalTitle}>Inspection Items</Text>
+                <Text style={styles.noteModalSubtitle}>
+                  {manualItems.length > 0
+                    ? "Review, edit, and keep adding property needs without losing your place."
+                    : "Add restock needs, repairs, tasks, and notes as you inspect."}
+                </Text>
               </View>
 
-              <TouchableOpacity
-                style={[styles.noteModalSubmit, { marginBottom: 8 }]}
-                onPress={() => {
-                  setShowNotesLogModal(false);
-                  setTimeout(() => handleAddNote(), 300);
-                }}
+              {manualItems.length === 0 ? (
+                <View style={styles.notesLogEmptyState}>
+                  <Ionicons name="list-outline" size={26} color={colors.muted} />
+                  <Text style={styles.notesLogEmptyTitle}>No items yet</Text>
+                  <Text style={styles.notesLogEmptyText}>
+                    Add the first item to start building your restock and repair list.
+                  </Text>
+                </View>
+              ) : (
+                <ScrollView
+                  style={styles.sheetBody}
+                  contentContainerStyle={styles.notesLogListContent}
+                  showsVerticalScrollIndicator={false}
+                >
+                  {groupedManualItems.map((group) => (
+                    <View key={group.itemType} style={styles.itemGroupSection}>
+                      <View style={styles.itemGroupHeader}>
+                        <View style={styles.itemGroupTitleRow}>
+                          <Ionicons
+                            name={getItemTypeIcon(group.itemType)}
+                            size={16}
+                            color={getItemTypeAccent(group.itemType)}
+                          />
+                          <Text style={styles.itemGroupTitle}>
+                            {ADD_ITEM_TYPE_OPTIONS.find((option) => option.key === group.itemType)?.label || "Item"}
+                          </Text>
+                        </View>
+                        <View style={styles.itemGroupCountBadge}>
+                          <Text style={styles.itemGroupCountText}>{group.items.length}</Text>
+                        </View>
+                      </View>
+
+                      {group.items.map((item) => {
+                        const itemType = item.itemType || group.itemType;
+                        const accent = getItemTypeAccent(itemType);
+                        const isExpanded = expandedItemIds.includes(item.id);
+                        const quantity = item.restockQuantity || 1;
+                        const headline =
+                          itemType === "restock"
+                            ? stripRestockQuantitySuffix(item.description)
+                            : item.description;
+                        const showExpand = headline.length > 90;
+                        return (
+                          <View key={item.id} style={styles.noteListItemCard}>
+                            <View style={styles.noteListItemHeader}>
+                              <View style={[styles.noteListIconWrap, { backgroundColor: `${accent}18` }]}>
+                                <Ionicons name={getItemTypeIcon(itemType)} size={16} color={accent} />
+                              </View>
+                              <View style={styles.noteListItemBody}>
+                                <Text
+                                  style={styles.noteListText}
+                                  numberOfLines={isExpanded ? undefined : 2}
+                                >
+                                  {headline}
+                                </Text>
+                                <View style={styles.noteListMetaRow}>
+                                  <Text style={styles.noteListMetaText}>
+                                    {item.roomName || currentRoom || "Current room"}
+                                  </Text>
+                                  {itemType === "restock" && (
+                                    <View style={styles.noteListBadge}>
+                                      <Text style={styles.noteListBadgeText}>Qty {quantity}</Text>
+                                    </View>
+                                  )}
+                                  {item.supplyItemId && (
+                                    <View style={styles.noteListBadge}>
+                                      <Text style={styles.noteListBadgeText}>Catalog linked</Text>
+                                    </View>
+                                  )}
+                                </View>
+                                {showExpand && (
+                                  <TouchableOpacity onPress={() => toggleExpandedItem(item.id)} hitSlop={8}>
+                                    <Text style={styles.noteListExpandText}>
+                                      {isExpanded ? "Show less" : "Show more"}
+                                    </Text>
+                                  </TouchableOpacity>
+                                )}
+                              </View>
+                              {item.imageUrl ? (
+                                <Image source={{ uri: item.imageUrl }} style={styles.noteListThumb} contentFit="cover" />
+                              ) : item.videoUrl ? (
+                                <View style={styles.noteListThumbVideo}>
+                                  <Ionicons name="videocam" size={18} color={colors.primary} />
+                                </View>
+                              ) : null}
+                            </View>
+
+                            <View style={styles.noteListActions}>
+                              <TouchableOpacity
+                                onPress={() => handleEditItem(item)}
+                                style={styles.noteListActionButton}
+                                activeOpacity={0.7}
+                              >
+                                <Ionicons name="create-outline" size={14} color={colors.primary} />
+                                <Text style={styles.noteListActionText}>Edit</Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity
+                                onPress={() => handleDeleteNote(item.id)}
+                                style={styles.noteDeleteButton}
+                                activeOpacity={0.7}
+                              >
+                                <Text style={styles.noteDeleteButtonText}>Delete</Text>
+                              </TouchableOpacity>
+                            </View>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  ))}
+                </ScrollView>
+              )}
+
+              <View
+                style={[
+                  styles.sheetFooter,
+                  { paddingBottom: Math.max(insets.bottom, 16) },
+                ]}
               >
-                <Text style={styles.noteModalSubmitText}>+ Add Note</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.noteModalCancel}
-                onPress={() => setShowNotesLogModal(false)}
-              >
-                <Text style={styles.noteModalCancelText}>Done</Text>
-              </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.noteModalSubmit, { flex: 0, marginBottom: spacing.sm }]}
+                  onPress={() => handleAddNote("item_log")}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.noteModalSubmitText}>+ Add Item</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.noteModalCancel, { flex: 0 }]}
+                  onPress={() => setShowNotesLogModal(false)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.noteModalCancelText}>Done</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
         </Modal>
@@ -3879,11 +4639,15 @@ export default function InspectionCameraScreen() {
       >
         <View style={styles.noteModalOverlay}>
           <View style={styles.notesLogModalContent}>
-            <Text style={styles.noteModalTitle}>Inspection Settings</Text>
-            <Text style={styles.noteModalSubtitle}>
-              Adjust how the inspection runs
-            </Text>
+            <View style={styles.sheetHandle} />
+            <View style={styles.sheetHeader}>
+              <Text style={styles.noteModalTitle}>Inspection Settings</Text>
+              <Text style={styles.noteModalSubtitle}>
+                Adjust how the inspection runs
+              </Text>
+            </View>
 
+            <View style={{ paddingHorizontal: spacing.screen, paddingBottom: spacing.screen }}>
             <View style={styles.settingsSection}>
               <View
                 style={[
@@ -3895,7 +4659,7 @@ export default function InspectionCameraScreen() {
                   <Ionicons
                     name="scan-outline"
                     size={20}
-                    color={autoCaptureEnabled ? "#22c55e" : colors.muted}
+                    color={autoCaptureEnabled ? colors.category.restock : colors.muted}
                   />
                   <View>
                     <Text style={styles.settingsLabel}>Hands-Free Capture</Text>
@@ -3907,10 +4671,10 @@ export default function InspectionCameraScreen() {
                 <Switch
                   value={autoCaptureEnabled}
                   onValueChange={handleToggleHandsFree}
-                  thumbColor="#ffffff"
+                  thumbColor={colors.primaryForeground}
                   trackColor={{
-                    false: "rgba(148, 163, 184, 0.35)",
-                    true: "rgba(34, 197, 94, 0.55)",
+                    false: colors.camera.pillBorder,
+                    true: colors.successBorder,
                   }}
                 />
               </View>
@@ -3920,7 +4684,7 @@ export default function InspectionCameraScreen() {
                   <Ionicons
                     name="locate-outline"
                     size={20}
-                    color={isAutoDetect ? "#22c55e" : colors.muted}
+                    color={isAutoDetect ? colors.category.restock : colors.muted}
                   />
                   <View>
                     <Text style={styles.settingsLabel}>Room Selection</Text>
@@ -3967,11 +4731,12 @@ export default function InspectionCameraScreen() {
             </View>
 
             <TouchableOpacity
-              style={styles.noteModalSubmit}
+              style={[styles.noteModalSubmit, { flex: 0 }]}
               onPress={() => setShowSettingsModal(false)}
             >
               <Text style={styles.noteModalSubmitText}>Done</Text>
             </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -3988,7 +4753,7 @@ export default function InspectionCameraScreen() {
       {isInitializing && (
         <View style={styles.submissionOverlay}>
           <View style={styles.submissionCard}>
-            <Ionicons name="scan-outline" size={28} color="#2372B8" />
+            <Ionicons name="scan-outline" size={28} color={colors.primary} />
             <Text style={styles.submissionText}>Preparing inspection...</Text>
             <Text style={styles.submissionSubtext}>Loading room data and AI models</Text>
           </View>
@@ -3999,7 +4764,7 @@ export default function InspectionCameraScreen() {
       {submissionStatus && (
         <View style={styles.submissionOverlay}>
           <View style={styles.submissionCard}>
-            <ActivityIndicator size="large" color="#2372B8" />
+            <ActivityIndicator size="large" color={colors.primary} />
             <Text style={styles.submissionText}>{submissionStatus}</Text>
             <Text style={styles.submissionSubtext}>Coverage is already saved</Text>
           </View>
@@ -4016,44 +4781,44 @@ const styles = StyleSheet.create({
   },
   submissionOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.7)",
+    backgroundColor: colors.camera.overlay,
     justifyContent: "center",
     alignItems: "center",
     zIndex: 100,
   },
   submissionCard: {
-    backgroundColor: "rgba(15,20,30,0.95)",
+    backgroundColor: colors.camera.sheetBg,
     borderRadius: 20,
-    paddingHorizontal: 32,
-    paddingVertical: 28,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.section,
     alignItems: "center",
-    gap: 12,
+    gap: spacing.content,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
+    borderColor: colors.camera.borderSubtle,
   },
   submissionText: {
-    color: "#fff",
+    color: colors.camera.text,
     fontSize: 16,
     fontWeight: "600",
   },
   submissionSubtext: {
-    color: "rgba(255,255,255,0.5)",
+    color: colors.camera.textMuted,
     fontSize: 13,
   },
   zoomIndicator: {
     position: "absolute",
     bottom: "45%",
     alignSelf: "center",
-    backgroundColor: "rgba(0,0,0,0.65)",
-    borderRadius: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
+    backgroundColor: colors.camera.overlay,
+    borderRadius: radius.xl,
+    paddingHorizontal: spacing.card,
+    paddingVertical: spacing.tight,
     zIndex: 5,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
+    borderColor: colors.camera.borderSubtle,
   },
   zoomText: {
-    color: "#fff",
+    color: colors.camera.text,
     fontSize: 14,
     fontWeight: "600",
   },
@@ -4068,33 +4833,33 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    gap: 12,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
+    gap: spacing.content,
   },
   endButton: {
-    backgroundColor: "rgba(0,0,0,0.65)",
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    backgroundColor: colors.camera.overlay,
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.card,
     minHeight: 44,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
+    borderColor: colors.camera.borderSubtle,
     flexShrink: 0,
   },
   endButtonText: {
-    color: "#fff",
+    color: colors.camera.text,
     fontSize: 15,
     fontWeight: "600",
   },
   roomBadge: {
-    backgroundColor: "rgba(2, 6, 23, 0.78)",
+    backgroundColor: colors.camera.panelBg,
     borderRadius: 14,
-    paddingHorizontal: 18,
-    paddingVertical: 12,
+    paddingHorizontal: spacing.container,
+    paddingVertical: spacing.content,
     alignItems: "flex-start",
     borderWidth: 1,
-    borderColor: "rgba(77,166,255,0.24)",
+    borderColor: colors.primaryBorder,
     flex: 1,
     minWidth: 0,
   },
@@ -4102,35 +4867,35 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-start",
     flexWrap: "wrap",
-    gap: 8,
+    gap: spacing.sm,
     width: "100%",
   },
   roomName: {
-    color: "#fff",
+    color: colors.camera.text,
     fontSize: 17,
     fontWeight: "700",
     flexShrink: 1,
     minWidth: 0,
   },
   detectModeBadge: {
-    backgroundColor: "rgba(148,163,184,0.18)",
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
+    backgroundColor: colors.camera.panelBorder,
+    borderRadius: radius.full,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xxs,
   },
   detectModeBadgeAuto: {
-    backgroundColor: "rgba(59,130,246,0.2)",
+    backgroundColor: colors.primaryBgStrong,
   },
   detectModeText: {
-    color: "rgba(226,232,240,0.78)",
+    color: colors.camera.textBody,
     fontSize: 9,
     fontWeight: "600",
     letterSpacing: 0.4,
   },
   angleCount: {
-    color: "rgba(191,219,254,0.86)",
+    color: colors.camera.textAccent,
     fontSize: 12,
-    marginTop: 6,
+    marginTop: spacing.tight,
     fontWeight: "600",
     width: "100%",
   },
@@ -4138,26 +4903,26 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     alignSelf: "flex-start",
-    backgroundColor: "rgba(2,6,23,0.68)",
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    backgroundColor: colors.camera.panelBg,
+    borderRadius: radius.full,
+    paddingHorizontal: spacing.element,
+    paddingVertical: spacing.tight,
     gap: 5,
     borderWidth: 1,
-    borderColor: "rgba(148,163,184,0.14)",
+    borderColor: colors.camera.itemBorder,
     flexShrink: 0,
   },
   recDot: {
     width: 7,
     height: 7,
-    borderRadius: 3.5,
+    borderRadius: radius.full,
     backgroundColor: colors.error,
   },
   recDotProcessing: {
     backgroundColor: colors.primary,
   },
   recText: {
-    color: "rgba(255,255,255,0.82)",
+    color: colors.camera.textMedium,
     fontSize: 11,
     fontWeight: "600",
     letterSpacing: 0.4,
@@ -4165,68 +4930,105 @@ const styles = StyleSheet.create({
   coverageRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 16,
-    marginTop: 10,
-    gap: 8,
+    paddingHorizontal: spacing.md,
+    marginTop: spacing.element,
+    gap: spacing.sm,
   },
-  pauseOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.75)",
-    justifyContent: "center",
+  pauseBannerContainer: {
+    position: "absolute",
+    top: 112,
+    left: spacing.md,
+    right: spacing.md,
+    zIndex: 25,
+  },
+  pauseBanner: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.content,
+    paddingHorizontal: spacing.card,
+    paddingVertical: spacing.content,
+    borderRadius: radius.xl,
+    backgroundColor: colors.camera.sheetBg,
+    borderWidth: 1,
+    borderColor: colors.camera.borderSubtle,
+  },
+  pauseBadge: {
+    width: 32,
+    height: 32,
+    borderRadius: radius.full,
     alignItems: "center",
-    zIndex: 25, // Must be above FindingsPanel (z-index: 20) to block interaction when paused
+    justifyContent: "center",
+    backgroundColor: colors.warningBg,
+    borderWidth: 1,
+    borderColor: colors.warningBg,
   },
-  pauseText: {
-    color: colors.primary,
-    fontSize: 36,
-    fontWeight: "600",
-    letterSpacing: 6,
+  pauseCopy: {
+    flex: 1,
+    gap: spacing.xxs,
   },
-  pauseSubtext: {
-    color: colors.slate300,
+  pauseBannerTitle: {
+    color: colors.camera.text,
     fontSize: 15,
-    marginTop: 10,
-    fontWeight: "500",
+    fontWeight: "700",
+  },
+  pauseBannerText: {
+    color: colors.camera.textMuted,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  pauseResumeButton: {
+    alignSelf: "center",
+    paddingHorizontal: spacing.content,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.full,
+    backgroundColor: colors.primaryBgStrong,
+    borderWidth: 1,
+    borderColor: colors.primaryBorder,
+  },
+  pauseResumeText: {
+    color: colors.primary,
+    fontSize: 13,
+    fontWeight: "700",
   },
   bottomControls: {
     position: "absolute",
     bottom: 0,
     left: 0,
     right: 0,
-    paddingBottom: 8,
+    paddingBottom: spacing.sm,
     zIndex: 10,
   },
   captureRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-evenly",
-    paddingHorizontal: 12,
-    gap: 12,
+    paddingHorizontal: spacing.content,
+    gap: spacing.content,
   },
   captureHintBubble: {
-    marginBottom: 12,
-    marginHorizontal: 16,
-    backgroundColor: "rgba(15, 23, 42, 0.9)",
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    marginBottom: spacing.content,
+    marginHorizontal: spacing.md,
+    backgroundColor: colors.camera.sheetBg,
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.card,
+    paddingVertical: spacing.element,
     borderWidth: 1,
-    borderColor: "rgba(148,163,184,0.2)",
+    borderColor: colors.camera.pillBorder,
   },
   captureHintText: {
-    color: "#fff",
+    color: colors.camera.text,
     fontSize: 14,
     fontWeight: "600",
   },
   captureButton: {
     width: 76,
     height: 76,
-    borderRadius: 38,
-    backgroundColor: "rgba(255,255,255,0.15)",
+    borderRadius: radius.full,
+    backgroundColor: colors.camera.borderMedium,
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 2,
-    borderColor: "rgba(255,255,255,0.2)",
+    borderColor: colors.camera.borderPreview,
   },
   captureButtonProcessing: {
     opacity: 0.5,
@@ -4234,7 +5036,7 @@ const styles = StyleSheet.create({
   captureRing: {
     width: 58,
     height: 58,
-    borderRadius: 29,
+    borderRadius: radius.full,
     borderWidth: 4,
     borderColor: colors.camera.text,
   },
@@ -4246,13 +5048,13 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     width: 60,
     minHeight: 44,
-    gap: 4,
+    gap: spacing.xs,
   },
   utilityButtonWide: {
     width: 88,
   },
   utilityButtonText: {
-    color: "rgba(255,255,255,0.6)",
+    color: colors.camera.textMuted,
     fontSize: 11,
     fontWeight: "500",
     letterSpacing: 0.2,
@@ -4260,60 +5062,487 @@ const styles = StyleSheet.create({
   noteModalOverlay: {
     flex: 1,
     justifyContent: "flex-end",
-    backgroundColor: "rgba(0,0,0,0.6)",
+    backgroundColor: colors.camera.overlay,
   },
-  noteModalContent: {
+  sheetContent: {
     backgroundColor: colors.card,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    padding: 24,
-    paddingBottom: 40,
-  },
-  notesLogModalContent: {
-    marginHorizontal: 20,
-    marginTop: "30%",
-    backgroundColor: colors.card,
-    borderRadius: 16,
-    padding: 20,
+    maxHeight: "88%",
     borderWidth: 1,
     borderColor: colors.stone,
-    maxHeight: "55%",
+    flexShrink: 1,
   },
-  notesLogList: {
-    marginTop: 4,
-    marginBottom: 14,
-    gap: 8,
+  notesLogModalContent: {
+    backgroundColor: colors.card,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderWidth: 1,
+    borderColor: colors.stone,
+    maxHeight: "82%",
+  },
+  sheetHandle: {
+    alignSelf: "center",
+    width: 40,
+    height: 5,
+    borderRadius: radius.full,
+    backgroundColor: colors.stone,
+    marginTop: spacing.element,
+    marginBottom: spacing.tight,
+  },
+  sheetHeader: {
+    paddingHorizontal: spacing.screen,
+    paddingTop: spacing.xs,
+    paddingBottom: spacing.content,
+  },
+  sheetContextBadge: {
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.tight,
+    marginTop: 2,
+  },
+  sheetContextText: {
+    color: colors.muted,
+    fontSize: 11,
+    fontWeight: "500",
+  },
+  sheetBody: {
+    flex: 1,
+  },
+  sheetBodyContent: {
+    paddingHorizontal: spacing.screen,
+    paddingBottom: spacing.xl,
+    gap: spacing.card,
+  },
+  sheetFooter: {
+    paddingHorizontal: spacing.screen,
+    paddingTop: spacing.content,
+    borderTopWidth: 1,
+    borderTopColor: colors.stone,
+    backgroundColor: colors.card,
+  },
+  addItemChipRow: {
+    flexDirection: "row",
+    gap: spacing.sm,
+    flexWrap: "wrap",
+  },
+  addItemChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.tight,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.card,
+    borderRadius: radius.full,
+    borderWidth: 1,
+  },
+  addItemChipText: {
+    fontWeight: "600",
+    fontSize: 13,
+  },
+  inlineHelperBanner: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.sm,
+    padding: spacing.content,
+    borderRadius: radius.lg,
+    backgroundColor: colors.successBg,
+    borderWidth: 1,
+    borderColor: colors.successBorder,
+  },
+  inlineHelperText: {
+    flex: 1,
+    color: colors.success,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "500",
+  },
+  inlineHelperBannerMuted: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.sm,
+    padding: spacing.content,
+    borderRadius: radius.lg,
+    backgroundColor: colors.secondary,
+    borderWidth: 1,
+    borderColor: colors.stone,
+  },
+  inlineHelperMutedText: {
+    flex: 1,
+    color: colors.muted,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  inlineHelperLinkButton: {
+    alignSelf: "flex-start",
+    paddingHorizontal: spacing.element,
+    paddingVertical: spacing.tight,
+    borderRadius: radius.full,
+    backgroundColor: colors.primaryBgStrong,
+  },
+  inlineHelperLinkText: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  quickTemplatesSection: {
+    gap: spacing.sm,
+  },
+  quickTemplateRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+  },
+  quickTemplateChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.tight,
+    paddingHorizontal: spacing.element,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.full,
+    backgroundColor: colors.secondary,
+    borderWidth: 1,
+    borderColor: colors.stone,
+  },
+  quickTemplateText: {
+    color: colors.heading,
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  sectionMiniLabel: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: 0.4,
+    textTransform: "uppercase",
+  },
+  selectedSupplyCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    backgroundColor: colors.successBg,
+    borderRadius: radius.md,
+    padding: spacing.element,
+    borderWidth: 1,
+    borderColor: colors.successBorder,
+  },
+  selectedSupplyName: {
+    color: colors.heading,
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  selectedSupplyMeta: {
+    color: colors.muted,
+    fontSize: 11,
+  },
+  voiceButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.sm,
+    paddingVertical: spacing.element,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.full,
+    backgroundColor: colors.primaryBg,
+    alignSelf: "center",
+  },
+  voiceButtonActive: {
+    backgroundColor: colors.destructive,
+  },
+  voiceButtonText: {
+    color: colors.primary,
+    fontWeight: "600",
+    fontSize: 14,
+  },
+  voiceButtonTextActive: {
+    color: colors.camera.text,
+  },
+  inputSection: {
+    gap: spacing.sm,
+  },
+  quantityRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: colors.secondary,
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.card,
+    paddingVertical: spacing.content,
+    borderWidth: 1,
+    borderColor: colors.stone,
+  },
+  quantityLabel: {
+    color: colors.heading,
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  quantityControls: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.content,
+  },
+  quantityButton: {
+    width: 32,
+    height: 32,
+    borderRadius: radius.full,
+    backgroundColor: colors.primaryBg,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  quantityValue: {
+    minWidth: 24,
+    textAlign: "center",
+    color: colors.heading,
+    fontSize: 18,
+    fontWeight: "700",
+  },
+  evidenceSection: {
+    gap: spacing.element,
+    padding: spacing.card,
+    borderRadius: 14,
+    backgroundColor: colors.secondary,
+    borderWidth: 1,
+    borderColor: colors.stone,
+  },
+  evidenceHeader: {
+    gap: spacing.xs,
+  },
+  evidenceSubtext: {
+    color: colors.muted,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  evidenceActionsRow: {
+    flexDirection: "row",
+    gap: spacing.element,
+    flexWrap: "wrap",
+  },
+  evidenceAction: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.tight,
+    paddingHorizontal: spacing.content,
+    paddingVertical: spacing.element,
+    borderRadius: radius.md,
+    backgroundColor: colors.primaryBgStrong,
+    borderWidth: 1,
+    borderColor: colors.primaryBorder,
+  },
+  evidenceActionDanger: {
+    backgroundColor: colors.destructive,
+    borderColor: colors.destructive,
+  },
+  evidenceActionText: {
+    color: colors.primary,
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  evidenceActionTextDanger: {
+    color: colors.camera.text,
+  },
+  attachmentCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.element,
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.stone,
+    padding: spacing.element,
+  },
+  attachmentPreview: {
+    width: 58,
+    height: 58,
+    borderRadius: radius.md,
+    backgroundColor: colors.stone,
+  },
+  videoAttachmentBadge: {
+    width: 58,
+    height: 58,
+    borderRadius: radius.md,
+    backgroundColor: colors.primaryBgStrong,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  attachmentTitle: {
+    color: colors.heading,
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  attachmentMeta: {
+    color: colors.muted,
+    fontSize: 12,
+    marginTop: spacing.xxs,
+  },
+  attachmentRemoveButton: {
+    width: 32,
+    height: 32,
+    borderRadius: radius.full,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.errorBg,
+  },
+  notesLogEmptyState: {
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.element,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 36,
+  },
+  notesLogEmptyTitle: {
+    color: colors.heading,
+    fontSize: 16,
+    fontWeight: "600",
   },
   notesLogEmptyText: {
     color: colors.muted,
     fontSize: 14,
     fontWeight: "500",
+    textAlign: "center",
+    lineHeight: 20,
   },
-  noteListItem: {
+  notesLogListContent: {
+    paddingHorizontal: spacing.screen,
+    paddingBottom: spacing.md,
+    gap: spacing.md,
+  },
+  itemGroupSection: {
+    gap: spacing.element,
+  },
+  itemGroupHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: 10,
+  },
+  itemGroupTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  itemGroupTitle: {
+    color: colors.heading,
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  itemGroupCountBadge: {
+    minWidth: 24,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.full,
     backgroundColor: colors.secondary,
-    borderRadius: 10,
+    alignItems: "center",
+  },
+  itemGroupCountText: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  noteListItemCard: {
+    backgroundColor: colors.secondary,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: colors.stone,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    padding: spacing.content,
+    gap: spacing.element,
+  },
+  noteListItemHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.element,
+  },
+  noteListIconWrap: {
+    width: 30,
+    height: 30,
+    borderRadius: radius.full,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: spacing.xxs,
+  },
+  noteListItemBody: {
+    flex: 1,
+    gap: spacing.tight,
   },
   noteListText: {
-    flex: 1,
     color: colors.foreground,
     fontSize: 14,
     fontWeight: "500",
+    lineHeight: 20,
+  },
+  noteListMetaRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+    alignItems: "center",
+  },
+  noteListMetaText: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: "500",
+  },
+  noteListBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.full,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.stone,
+  },
+  noteListBadgeText: {
+    color: colors.primary,
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  noteListExpandText: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  noteListThumb: {
+    width: 52,
+    height: 52,
+    borderRadius: radius.md,
+    backgroundColor: colors.card,
+  },
+  noteListThumbVideo: {
+    width: 52,
+    height: 52,
+    borderRadius: radius.md,
+    backgroundColor: colors.card,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: colors.stone,
+  },
+  noteListActions: {
+    flexDirection: "row",
+    justifyContent: "flex-start",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  noteListActionButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.tight,
+    paddingHorizontal: spacing.element,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
+    backgroundColor: colors.primaryBgStrong,
+  },
+  noteListActionText: {
+    color: colors.primary,
+    fontSize: 13,
+    fontWeight: "600",
   },
   noteDeleteButton: {
-    backgroundColor: "rgba(239,68,68,0.1)",
-    borderRadius: 8,
+    backgroundColor: colors.errorBg,
+    borderRadius: radius.sm,
     borderWidth: 1,
-    borderColor: "rgba(239,68,68,0.25)",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    borderColor: colors.errorBorder,
+    paddingHorizontal: spacing.element,
+    paddingVertical: spacing.tight,
   },
   noteDeleteButtonText: {
     color: colors.error,
@@ -4324,34 +5553,33 @@ const styles = StyleSheet.create({
     color: colors.heading,
     fontSize: 20,
     fontWeight: "600",
-    marginBottom: 4,
+    marginBottom: spacing.xs,
   },
   noteModalSubtitle: {
     color: colors.muted,
     fontSize: 14,
-    marginBottom: 16,
+    marginBottom: spacing.md,
   },
   noteInput: {
     backgroundColor: colors.secondary,
-    borderRadius: 12,
-    padding: 16,
+    borderRadius: radius.lg,
+    padding: spacing.md,
     color: colors.foreground,
     fontSize: 16,
-    minHeight: 80,
+    minHeight: 104,
     textAlignVertical: "top",
     borderWidth: 1,
     borderColor: colors.stone,
   },
   noteModalButtons: {
     flexDirection: "row",
-    gap: 12,
-    marginTop: 16,
+    gap: spacing.content,
   },
   noteModalCancel: {
     flex: 1,
     backgroundColor: colors.secondary,
-    borderRadius: 12,
-    paddingVertical: 14,
+    borderRadius: radius.lg,
+    paddingVertical: spacing.card,
     alignItems: "center",
   },
   noteModalCancelText: {
@@ -4360,9 +5588,10 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   noteModalSubmit: {
+    flex: 1,
     backgroundColor: colors.primary,
-    borderRadius: 12,
-    paddingVertical: 14,
+    borderRadius: radius.lg,
+    paddingVertical: spacing.card,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -4375,26 +5604,26 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   settingsSection: {
-    gap: 10,
-    marginBottom: 16,
+    gap: spacing.element,
+    marginBottom: spacing.md,
   },
   settingsRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     backgroundColor: colors.secondary,
-    borderRadius: 12,
-    padding: 14,
+    borderRadius: radius.lg,
+    padding: spacing.card,
     borderWidth: 1,
     borderColor: colors.stone,
   },
   settingsRowActive: {
-    borderColor: "rgba(34,197,94,0.3)",
+    borderColor: colors.successBorder,
   },
   settingsRowLeft: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    gap: spacing.content,
     flex: 1,
   },
   settingsLabel: {
@@ -4405,16 +5634,16 @@ const styles = StyleSheet.create({
   settingsDescription: {
     color: colors.muted,
     fontSize: 12,
-    marginTop: 2,
+    marginTop: spacing.xxs,
     flexShrink: 1,
   },
   settingsActionButton: {
-    backgroundColor: "rgba(77,166,255,0.12)",
-    borderRadius: 10,
+    backgroundColor: colors.primaryBgStrong,
+    borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: "rgba(77,166,255,0.25)",
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    borderColor: colors.primaryBorder,
+    paddingHorizontal: spacing.content,
+    paddingVertical: spacing.element,
   },
   settingsActionButtonDisabled: {
     opacity: 0.5,
@@ -4429,19 +5658,19 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     justifyContent: "center",
     alignItems: "center",
-    padding: 32,
+    padding: spacing.xl,
   },
   permissionText: {
-    color: "#fff",
+    color: colors.camera.text,
     fontSize: 18,
     textAlign: "center",
-    marginBottom: 20,
+    marginBottom: spacing.screen,
   },
   permissionButton: {
     backgroundColor: colors.primary,
     borderRadius: 14,
-    paddingHorizontal: 28,
-    paddingVertical: 14,
+    paddingHorizontal: spacing.section,
+    paddingVertical: spacing.card,
     shadowColor: colors.primary,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
@@ -4461,39 +5690,39 @@ const styles = StyleSheet.create({
   targetAssistStrip: {
     position: "absolute",
     bottom: 182,
-    left: 16,
-    right: 16,
+    left: spacing.md,
+    right: spacing.md,
     zIndex: 6,
     alignItems: "center",
-    gap: 8,
+    gap: spacing.sm,
   },
   targetAssistLabel: {
-    color: "#fff",
+    color: colors.camera.text,
     fontSize: 12,
     fontWeight: "600",
-    backgroundColor: "rgba(0,0,0,0.65)",
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    backgroundColor: colors.camera.overlay,
+    borderRadius: radius.full,
+    paddingHorizontal: spacing.content,
+    paddingVertical: spacing.tight,
   },
   ambiguousThumbnails: {
     flexDirection: "row",
-    gap: 12,
-    backgroundColor: "rgba(15,23,42,0.82)",
-    borderRadius: 10,
-    padding: 8,
+    gap: spacing.content,
+    backgroundColor: colors.camera.overlayCard,
+    borderRadius: radius.md,
+    padding: spacing.sm,
   },
   ambiguousThumb: {
     alignItems: "center",
-    borderRadius: 10,
+    borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.14)",
-    padding: 6,
-    backgroundColor: "rgba(15,23,42,0.82)",
+    borderColor: colors.camera.borderLight,
+    padding: spacing.tight,
+    backgroundColor: colors.camera.overlayCard,
   },
   ambiguousThumbSelected: {
-    borderColor: "rgba(34,197,94,0.7)",
-    backgroundColor: "rgba(34,197,94,0.14)",
+    borderColor: colors.camera.dotScannedLabel,
+    backgroundColor: colors.successBg,
   },
   ambiguousThumbImage: {
     width: 100,
@@ -4502,46 +5731,46 @@ const styles = StyleSheet.create({
   },
   ambiguousThumbRoomBadge: {
     position: "absolute",
-    top: 8,
-    left: 8,
-    backgroundColor: "rgba(0,0,0,0.7)",
-    borderRadius: 4,
+    top: spacing.sm,
+    left: spacing.sm,
+    backgroundColor: colors.camera.overlay,
+    borderRadius: radius.xs,
     paddingHorizontal: 5,
-    paddingVertical: 2,
+    paddingVertical: spacing.xxs,
   },
   ambiguousThumbRoomText: {
-    color: "rgba(255,255,255,0.9)",
+    color: colors.camera.textBright,
     fontSize: 9,
     fontWeight: "600",
     maxWidth: 80,
   },
   ambiguousThumbLabel: {
-    color: "rgba(255,255,255,0.88)",
+    color: colors.camera.textHigh,
     fontSize: 10,
     fontWeight: "500",
-    marginTop: 4,
+    marginTop: spacing.xs,
     textAlign: "center" as const,
     maxWidth: 100,
   },
   ambiguousThumbHint: {
-    color: "rgba(255,255,255,0.74)",
+    color: colors.camera.textMedium,
     fontSize: 9,
     fontWeight: "500",
-    marginTop: 2,
+    marginTop: spacing.xxs,
   },
   localizationGuide: {
     position: "absolute",
     bottom: "30%",
     alignSelf: "center",
-    backgroundColor: "rgba(15,23,42,0.8)",
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    backgroundColor: colors.camera.overlayCard,
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
     zIndex: 4,
     maxWidth: "82%",
   },
   localizationGuideText: {
-    color: "rgba(255,255,255,0.9)",
+    color: colors.camera.textBright,
     fontSize: 13,
     fontWeight: "500",
     textAlign: "center" as const,

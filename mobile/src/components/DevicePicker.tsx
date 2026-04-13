@@ -2,7 +2,7 @@ import React, { useCallback, useState } from "react";
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from "react-native";
 import type { ImageSourceType } from "../lib/image-source/types";
 import { bleManagerService } from "../lib/ble/ble-manager";
-import { colors } from "../lib/tokens";
+import { colors, radius, fontSize, spacing } from "../lib/tokens";
 
 interface Props {
   selected: ImageSourceType;
@@ -116,74 +116,74 @@ function Option({
 const styles = StyleSheet.create({
   container: {
     backgroundColor: colors.card,
-    borderRadius: 14,
+    borderRadius: radius.xl,
     borderWidth: 1,
     borderColor: colors.stone,
-    padding: 12,
-    marginBottom: 16,
+    padding: spacing.content,
+    marginBottom: spacing.md,
   },
   label: {
     color: colors.muted,
-    fontSize: 12,
+    fontSize: fontSize.caption,
     fontWeight: "600",
-    marginBottom: 10,
+    marginBottom: spacing.element,
     letterSpacing: 0.2,
     textTransform: "uppercase",
   },
   row: {
     flexDirection: "row",
-    gap: 8,
+    gap: spacing.sm,
   },
   option: {
     flex: 1,
-    borderRadius: 10,
+    borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.stone,
     backgroundColor: colors.secondary,
     minHeight: 52,
-    paddingVertical: 10,
-    paddingHorizontal: 8,
+    paddingVertical: spacing.element,
+    paddingHorizontal: spacing.sm,
     alignItems: "center",
     justifyContent: "center",
   },
   optionSelected: {
     borderColor: colors.primary,
-    backgroundColor: "rgba(77, 166, 255, 0.08)",
+    backgroundColor: colors.primaryBg,
   },
   optionLabel: {
     color: colors.heading,
-    fontSize: 13,
+    fontSize: fontSize.sm,
     fontWeight: "600",
   },
   optionLabelSelected: {
     color: colors.primary,
   },
   optionSubtitle: {
-    marginTop: 4,
+    marginTop: spacing.xs,
     color: colors.muted,
-    fontSize: 11,
+    fontSize: fontSize.micro,
   },
   scanButton: {
-    marginTop: 10,
-    borderRadius: 10,
+    marginTop: spacing.element,
+    borderRadius: radius.md,
     backgroundColor: colors.primary,
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 10,
+    paddingVertical: spacing.element,
   },
   scanButtonText: {
     color: colors.primaryForeground,
-    fontSize: 13,
+    fontSize: fontSize.sm,
     fontWeight: "600",
   },
   scanMessage: {
-    marginTop: 8,
+    marginTop: spacing.sm,
     color: colors.muted,
-    fontSize: 12,
+    fontSize: fontSize.caption,
   },
   previewHint: {
-    marginTop: 6,
+    marginTop: spacing.tight,
     color: colors.muted,
-    fontSize: 12,
+    fontSize: fontSize.caption,
   },
 });

@@ -12,6 +12,8 @@ export type AggregateType =
   | "guest"
   | "condition"
   | "system"
+  | "supply"
+  | "vendor"
   | "automation_action";
 
 // ============================================================================
@@ -373,6 +375,82 @@ export interface ConditionResolvedPayload {
 // System Events
 // ============================================================================
 
+export type VendorEventType =
+  | "VendorCreated"
+  | "VendorUpdated"
+  | "VendorRemoved";
+
+export interface VendorCreatedPayload {
+  vendorId: string;
+  name: string;
+  category: string;
+}
+
+export interface VendorUpdatedPayload {
+  vendorId: string;
+  changes: Record<string, unknown>;
+}
+
+export interface VendorRemovedPayload {
+  vendorId: string;
+  name: string;
+}
+
+export type SupplyEventType =
+  | "SupplyItemAdded"
+  | "SupplyItemUpdated"
+  | "SupplyItemRemoved"
+  | "RestockOrderCreated"
+  | "RestockOrderUpdated"
+  | "RestockOrderConfirmed"
+  | "VendorDispatchSent";
+
+export interface SupplyItemAddedPayload {
+  supplyItemId: string;
+  name: string;
+  category: string;
+  amazonAsin?: string;
+  roomId?: string;
+}
+
+export interface SupplyItemUpdatedPayload {
+  supplyItemId: string;
+  changes: Record<string, unknown>;
+}
+
+export interface SupplyItemRemovedPayload {
+  supplyItemId: string;
+  name: string;
+}
+
+export interface RestockOrderCreatedPayload {
+  orderId: string;
+  itemCount: number;
+  inspectionId?: string;
+  amazonCartUrl?: string;
+  source: "inspection" | "manual";
+}
+
+export interface RestockOrderUpdatedPayload {
+  orderId: string;
+  status: string;
+  previousStatus?: string;
+}
+
+export interface RestockOrderConfirmedPayload {
+  orderId: string;
+  itemCount: number;
+  amazonCartUrl?: string;
+  confirmedBy: string;
+}
+
+export interface VendorDispatchSentPayload {
+  orderId: string;
+  vendorName: string;
+  method: "email" | "sms";
+  itemCount: number;
+}
+
 export type SystemEventType =
   | "RestockItemDetected"
   | "PresentationFindingDetected"
@@ -420,6 +498,8 @@ export type EventType =
   | GuestEventType
   | ConditionEventType
   | SystemEventType
+  | SupplyEventType
+  | VendorEventType
   | AutomationEventType;
 
 // Payload type map for type-safe event emission
@@ -475,6 +555,18 @@ export type EventPayloadMap = {
   PresentationFindingDetected: PresentationFindingDetectedPayload;
   BaselineDeviationFlagged: BaselineDeviationFlaggedPayload;
   CoverageThresholdReached: CoverageThresholdReachedPayload;
+  // Supply
+  SupplyItemAdded: SupplyItemAddedPayload;
+  SupplyItemUpdated: SupplyItemUpdatedPayload;
+  SupplyItemRemoved: SupplyItemRemovedPayload;
+  RestockOrderCreated: RestockOrderCreatedPayload;
+  RestockOrderUpdated: RestockOrderUpdatedPayload;
+  RestockOrderConfirmed: RestockOrderConfirmedPayload;
+  VendorDispatchSent: VendorDispatchSentPayload;
+  // Vendor
+  VendorCreated: VendorCreatedPayload;
+  VendorUpdated: VendorUpdatedPayload;
+  VendorRemoved: VendorRemovedPayload;
   // Automation
   DamageClaimCreated: Record<string, unknown>;
   MaintenanceTicketCreated: Record<string, unknown>;
@@ -527,6 +619,18 @@ export const EVENT_AGGREGATE_MAP: Record<EventType, AggregateType> = {
   PresentationFindingDetected: "system",
   BaselineDeviationFlagged: "system",
   CoverageThresholdReached: "system",
+  // Supply
+  SupplyItemAdded: "supply",
+  SupplyItemUpdated: "supply",
+  SupplyItemRemoved: "supply",
+  RestockOrderCreated: "supply",
+  RestockOrderUpdated: "supply",
+  RestockOrderConfirmed: "supply",
+  VendorDispatchSent: "supply",
+  // Vendor
+  VendorCreated: "vendor",
+  VendorUpdated: "vendor",
+  VendorRemoved: "vendor",
   // Automation
   DamageClaimCreated: "automation_action",
   MaintenanceTicketCreated: "automation_action",

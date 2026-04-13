@@ -13,7 +13,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
 import { createInspection } from "../lib/api";
 import type { RootStackParamList, InspectionMode } from "../navigation";
-import { colors, radius, shadows } from '../lib/tokens';
+import { colors, radius, shadows, fontSize, spacing } from '../lib/tokens';
 import DevicePicker from "../components/DevicePicker";
 import type { ImageSourceType } from "../lib/image-source/types";
 
@@ -118,7 +118,7 @@ export default function InspectionStartScreen() {
                 prefillScreen: "InspectionStart",
               })
             }
-            style={{ marginTop: 8 }}
+            style={{ marginTop: spacing.sm }}
           >
             <Text style={styles.errorReportLink}>Report this issue</Text>
           </TouchableOpacity>
@@ -152,10 +152,10 @@ export default function InspectionStartScreen() {
                     {
                       backgroundColor: isSelected
                         ? `${mode.color}18`
-                        : "rgba(148, 163, 184, 0.06)",
+                        : colors.secondary,
                       borderColor: isSelected
                         ? `${mode.color}40`
-                        : "rgba(148, 163, 184, 0.1)",
+                        : colors.cardBorder,
                     },
                   ]}
                 >
@@ -224,51 +224,51 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
-    paddingHorizontal: 20,
-    paddingTop: 8,
+    paddingHorizontal: spacing.screen,
+    paddingTop: spacing.sm,
   },
   backButton: {
-    marginBottom: 20,
+    marginBottom: spacing.screen,
     alignSelf: "flex-start",
-    paddingVertical: 10,
-    paddingRight: 16,
+    paddingVertical: spacing.element,
+    paddingRight: spacing.md,
     minHeight: 44,
   },
   backButtonText: {
     color: colors.muted,
-    fontSize: 16,
+    fontSize: fontSize.bodyLg,
     fontWeight: "500",
   },
   title: {
-    fontSize: 30,
+    fontSize: fontSize.screenTitle,
     fontWeight: "600",
     color: colors.heading,
-    marginBottom: 4,
+    marginBottom: spacing.xs,
     letterSpacing: -0.5,
   },
   subtitle: {
-    fontSize: 15,
+    fontSize: fontSize.body,
     color: colors.muted,
-    marginBottom: 24,
+    marginBottom: spacing.lg,
     fontWeight: "500",
   },
   errorContainer: {
-    backgroundColor: "rgba(239, 68, 68, 0.1)",
+    backgroundColor: colors.errorBg,
     borderWidth: 1,
-    borderColor: "rgba(239, 68, 68, 0.25)",
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    marginBottom: 16,
+    borderColor: colors.errorBorder,
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.content,
+    marginBottom: spacing.md,
   },
   errorText: {
     color: colors.error,
-    fontSize: 14,
+    fontSize: fontSize.label,
     fontWeight: "500",
   },
   errorReportLink: {
     color: colors.error,
-    fontSize: 13,
+    fontSize: fontSize.sm,
     fontWeight: "600",
     textDecorationLine: "underline" as const,
   },
@@ -276,73 +276,73 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   modesContent: {
-    gap: 10,
-    paddingBottom: 8,
+    gap: spacing.element,
+    paddingBottom: spacing.sm,
   },
   modeCard: {
     backgroundColor: colors.card,
-    borderRadius: 16,
-    padding: 18,
+    borderRadius: radius.xl,
+    padding: spacing.container,
     borderWidth: 2,
     borderColor: colors.stone,
   },
   modeCardSelected: {
-    backgroundColor: "rgba(77, 166, 255, 0.04)",
+    backgroundColor: colors.primaryBg,
   },
   modeCardInner: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 14,
+    gap: spacing.card,
   },
   modeIcon: {
     width: 44,
     height: 44,
-    borderRadius: 12,
+    borderRadius: radius.lg,
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 1,
   },
   modeIconText: {
-    fontSize: 18,
+    fontSize: fontSize.h3,
     fontWeight: "600",
   },
   modeContent: {
     flex: 1,
   },
   modeLabel: {
-    fontSize: 17,
+    fontSize: fontSize.button,
     fontWeight: "600",
     color: colors.heading,
-    marginBottom: 4,
+    marginBottom: spacing.xs,
     letterSpacing: -0.2,
   },
   modeDescription: {
-    fontSize: 13,
+    fontSize: fontSize.sm,
     color: colors.muted,
     lineHeight: 18,
   },
   radioOuter: {
     width: 22,
     height: 22,
-    borderRadius: 11,
+    borderRadius: radius.full,
     borderWidth: 2,
     borderColor: colors.slate700,
     justifyContent: "center",
     alignItems: "center",
-    marginLeft: 4,
+    marginLeft: spacing.xs,
   },
   radioInner: {
     width: 12,
     height: 12,
-    borderRadius: 6,
+    borderRadius: radius.full,
   },
   startButton: {
     backgroundColor: colors.primary,
-    borderRadius: 16,
-    paddingVertical: 18,
+    borderRadius: radius.xl,
+    paddingVertical: spacing.container,
     alignItems: "center",
-    marginBottom: 40,
-    marginTop: 20,
+    marginBottom: spacing.safe,
+    marginTop: spacing.screen,
     shadowColor: colors.primary,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
@@ -355,7 +355,7 @@ const styles = StyleSheet.create({
   },
   startButtonText: {
     color: colors.primaryForeground,
-    fontSize: 18,
+    fontSize: fontSize.h3,
     fontWeight: "600",
     letterSpacing: 0.3,
   },

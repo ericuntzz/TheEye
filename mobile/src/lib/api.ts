@@ -1,14 +1,22 @@
 import { Platform } from "react-native";
+import Constants from "expo-constants";
 import * as FileSystem from "expo-file-system";
 import { supabase } from "./supabase";
 
-const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? "";
-if (!API_BASE) throw new Error("Missing EXPO_PUBLIC_API_URL env var");
+const CONFIGURED_API_BASE = normalizeApiBase(process.env.EXPO_PUBLIC_API_URL ?? "");
+if (!CONFIGURED_API_BASE && !__DEV__) {
+  throw new Error("Missing EXPO_PUBLIC_API_URL env var");
+}
 const LOCALHOST_API_PATTERN = /(^|:\/\/)(localhost|127\.0\.0\.1)(:|\/|$)/i;
+const DEV_API_PORT_START = 3000;
+const DEV_API_PORT_END = 3020;
+const DEV_HEALTHCHECK_TIMEOUT_MS = 1500;
+let resolvedApiBaseOverride: string | null = null;
+let devApiBaseDiscoveryPromise: Promise<string | null> | null = null;
 
-if (__DEV__ && LOCALHOST_API_PATTERN.test(API_BASE)) {
+if (__DEV__ && CONFIGURED_API_BASE && LOCALHOST_API_PATTERN.test(CONFIGURED_API_BASE)) {
   console.warn(
-    `[api] EXPO_PUBLIC_API_URL is ${API_BASE}. On physical devices, localhost points to the phone. Use your Mac LAN IP or run "npm run dev:phone".`,
+    `[api] EXPO_PUBLIC_API_URL is ${CONFIGURED_API_BASE}. On physical devices, localhost points to the phone. Use your Mac LAN IP or run "npm run dev:phone".`,
   );
 }
 
@@ -33,6 +41,179 @@ export class ApiError extends Error {
     this.status = status;
     this.name = "ApiError";
   }
+}
+
+function normalizeApiBase(value: string | null | undefined): string {
+  return value?.trim().replace(/\/+$/, "") ?? "";
+}
+
+function parseUrlSafe(value: string | null | undefined): URL | null {
+  if (!value) return null;
+  try {
+    return new URL(value);
+  } catch {
+    return null;
+  }
+}
+
+function extractHostFromUri(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const parsed = parseUrlSafe(value.includes("://") ? value : `http://${value}`);
+  return parsed?.hostname ?? null;
+}
+
+function isPrivateIpv4Host(host: string): boolean {
+  const ipv4Match = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!ipv4Match) return false;
+  const [a, b] = ipv4Match.slice(1).map(Number);
+  if ([a, b].some((part) => Number.isNaN(part))) return false;
+  return (
+    a === 10 ||
+    a === 127 ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 169 && b === 254)
+  );
+}
+
+function isLikelyLocalDevHost(host: string): boolean {
+  return (
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host.endsWith(".local") ||
+    isPrivateIpv4Host(host)
+  );
+}
+
+function getExpoDevHost(): string | null {
+  return (
+    extractHostFromUri(Constants.expoConfig?.hostUri) ||
+    extractHostFromUri(Constants.expoGoConfig?.debuggerHost) ||
+    extractHostFromUri(Constants.platform?.hostUri)
+  );
+}
+
+function buildApiBase(protocol: string, host: string, port: number): string {
+  return normalizeApiBase(`${protocol}//${host}:${port}`);
+}
+
+function getDerivedDevApiBase(): string | null {
+  if (!__DEV__) return null;
+  const host = getExpoDevHost();
+  if (!host) return null;
+  return buildApiBase("http:", host, DEV_API_PORT_START);
+}
+
+function getActiveApiBase(): string {
+  const candidate =
+    normalizeApiBase(resolvedApiBaseOverride) ||
+    CONFIGURED_API_BASE ||
+    getDerivedDevApiBase();
+
+  if (candidate) return candidate;
+
+  throw new Error(
+    "Missing EXPO_PUBLIC_API_URL env var and could not derive a dev API URL from Expo.",
+  );
+}
+
+function getApiBaseForDebug(): string {
+  return normalizeApiBase(resolvedApiBaseOverride) || CONFIGURED_API_BASE || getDerivedDevApiBase() || "(unset)";
+}
+
+async function isHealthyAtriaApi(base: string): Promise<boolean> {
+  try {
+    const response = await fetchWithTimeout(
+      `${base}/api/health`,
+      { method: "GET" },
+      DEV_HEALTHCHECK_TIMEOUT_MS,
+    );
+    if (!response.ok) return false;
+    const body = await response.text();
+    return body.includes('"status":"ok"') && body.includes('"service":"atria-web"');
+  } catch {
+    return false;
+  }
+}
+
+async function discoverHealthyDevApiBase(
+  failedBase: string,
+): Promise<string | null> {
+  if (!__DEV__) return null;
+
+  const normalizedFailedBase = normalizeApiBase(failedBase);
+  if (
+    resolvedApiBaseOverride &&
+    normalizeApiBase(resolvedApiBaseOverride) !== normalizedFailedBase
+  ) {
+    return resolvedApiBaseOverride;
+  }
+
+  if (devApiBaseDiscoveryPromise) {
+    return devApiBaseDiscoveryPromise;
+  }
+
+  devApiBaseDiscoveryPromise = (async () => {
+    const configuredUrl = parseUrlSafe(CONFIGURED_API_BASE);
+    const candidateHosts = new Set<string>();
+    const configuredHost = configuredUrl?.hostname;
+    const expoHost = getExpoDevHost();
+
+    if (configuredHost && isLikelyLocalDevHost(configuredHost)) {
+      candidateHosts.add(configuredHost);
+    }
+    if (expoHost && isLikelyLocalDevHost(expoHost)) {
+      candidateHosts.add(expoHost);
+    }
+
+    if (candidateHosts.size === 0) {
+      return null;
+    }
+
+    const candidatePorts: number[] = [];
+    const pushPort = (port: number) => {
+      if (
+        Number.isInteger(port) &&
+        port >= 1 &&
+        port <= 65535 &&
+        !candidatePorts.includes(port)
+      ) {
+        candidatePorts.push(port);
+      }
+    };
+
+    const configuredPort = configuredUrl?.port ? parseInt(configuredUrl.port, 10) : null;
+    if (configuredPort) pushPort(configuredPort);
+    for (let port = DEV_API_PORT_START; port <= DEV_API_PORT_END; port += 1) {
+      pushPort(port);
+    }
+
+    for (const host of candidateHosts) {
+      const candidateProtocol =
+        host === configuredHost && configuredUrl?.protocol === "https:"
+          ? "https:"
+          : "http:";
+      for (const port of candidatePorts) {
+        const candidate = buildApiBase(candidateProtocol, host, port);
+        if (candidate === normalizedFailedBase) continue;
+        if (await isHealthyAtriaApi(candidate)) {
+          resolvedApiBaseOverride = candidate;
+          if (__DEV__) {
+            console.warn(
+              `[api] Recovered from unreachable API base ${normalizedFailedBase} -> ${candidate}`,
+            );
+          }
+          return candidate;
+        }
+      }
+    }
+
+    return null;
+  })().finally(() => {
+    devApiBaseDiscoveryPromise = null;
+  });
+
+  return devApiBaseDiscoveryPromise;
 }
 
 async function signOutExpiredSession() {
@@ -103,78 +284,100 @@ async function authFetch(path: string, options: FetchOptions = {}) {
     fetchOptions.body = JSON.stringify(json);
   }
 
-  const url = `${API_BASE}${path}`;
   const maxAttempts = noRetry ? 1 : MAX_RETRIES + 1;
+  let requestBase = getActiveApiBase();
+  let hasRetriedWithRecoveredBase = false;
 
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      const res = await fetchWithTimeout(url, { ...fetchOptions, headers }, timeoutMs);
+  requestLoop: while (true) {
+    const url = `${requestBase}${path}`;
 
-      // On 401, try refreshing the token once and retry
-      if (res.status === 401 && attempt === 1) {
-        const { data: refreshData } = await supabase.auth.refreshSession();
-        if (refreshData.session?.access_token) {
-          headers.Authorization = `Bearer ${refreshData.session.access_token}`;
-          continue; // Retry with new token
-        }
-        await signOutExpiredSession();
-        throw new ApiError(401, "Session expired. Please sign in again.");
-      }
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const res = await fetchWithTimeout(url, { ...fetchOptions, headers }, timeoutMs);
 
-      if (!res.ok) {
-        const error = await res.json().catch(() => ({ error: `${res.status} ${res.statusText}` }));
-        const apiError = new ApiError(res.status, error.error || error.message || `Request failed (${res.status})`);
-
-        if (res.status === 401) {
+        // On 401, try refreshing the token once and retry
+        if (res.status === 401 && attempt === 1) {
+          const { data: refreshData } = await supabase.auth.refreshSession();
+          if (refreshData.session?.access_token) {
+            headers.Authorization = `Bearer ${refreshData.session.access_token}`;
+            continue; // Retry with new token
+          }
           await signOutExpiredSession();
+          throw new ApiError(401, "Session expired. Please sign in again.");
         }
 
-        // Retry on 5xx server errors (not on 4xx client errors)
-        if (res.status >= 500 && attempt < maxAttempts) {
-          await delay(attempt * 1000); // 1s, 2s backoff
+        if (!res.ok) {
+          const error = await res
+            .json()
+            .catch(() => ({ error: `${res.status} ${res.statusText}` }));
+          const apiError = new ApiError(
+            res.status,
+            error.error || error.message || `Request failed (${res.status})`,
+          );
+
+          if (res.status === 401) {
+            await signOutExpiredSession();
+          }
+
+          // Retry on 5xx server errors (not on 4xx client errors)
+          if (res.status >= 500 && attempt < maxAttempts) {
+            await delay(attempt * 1000); // 1s, 2s backoff
+            continue;
+          }
+
+          // Auto-report 5xx errors to support (after retries exhausted)
+          if (res.status >= 500) {
+            reportError({
+              errorMessage: apiError.message,
+              httpStatus: apiError.status,
+              action: `${fetchOptions.method || "GET"} ${path}`,
+              isAutomatic: true,
+            });
+          }
+          throw apiError;
+        }
+
+        return res;
+      } catch (err) {
+        // Retry on network/timeout errors
+        if (err instanceof ApiError) throw err;
+        if ((err as Error).name === "AbortError" && fetchOptions.signal?.aborted) {
+          throw err;
+        }
+        if (attempt < maxAttempts) {
+          await delay(attempt * 1000);
           continue;
         }
 
-        // Auto-report 5xx errors to support (after retries exhausted)
-        if (res.status >= 500) {
+        if (!hasRetriedWithRecoveredBase) {
+          const recoveredBase = await discoverHealthyDevApiBase(requestBase);
+          if (recoveredBase && recoveredBase !== requestBase) {
+            requestBase = recoveredBase;
+            hasRetriedWithRecoveredBase = true;
+            continue requestLoop;
+          }
+        }
+
+        if ((err as Error).name === "AbortError") {
           reportError({
-            errorMessage: apiError.message,
-            httpStatus: apiError.status,
+            errorMessage: "Request timed out",
+            httpStatus: 0,
             action: `${fetchOptions.method || "GET"} ${path}`,
             isAutomatic: true,
           });
+          throw new ApiError(0, withPhoneDevHint("Request timed out."));
         }
-        throw apiError;
-      }
-
-      return res;
-    } catch (err) {
-      // Retry on network/timeout errors
-      if (err instanceof ApiError) throw err;
-      if ((err as Error).name === "AbortError" && fetchOptions.signal?.aborted) {
-        throw err;
-      }
-      if (attempt < maxAttempts) {
-        await delay(attempt * 1000);
-        continue;
-      }
-      if ((err as Error).name === "AbortError") {
         reportError({
-          errorMessage: "Request timed out",
+          errorMessage: "Network error",
           httpStatus: 0,
           action: `${fetchOptions.method || "GET"} ${path}`,
           isAutomatic: true,
         });
-        throw new ApiError(0, withPhoneDevHint("Request timed out."));
+        throw new ApiError(0, withPhoneDevHint("Network error."));
       }
-      reportError({
-        errorMessage: "Network error",
-        httpStatus: 0,
-        action: `${fetchOptions.method || "GET"} ${path}`,
-        isAutomatic: true,
-      });
-      throw new ApiError(0, withPhoneDevHint("Network error."));
     }
+
+    break;
   }
 
   // Should not reach here, but satisfy TypeScript
@@ -187,10 +390,11 @@ function delay(ms: number) {
 
 function withPhoneDevHint(baseMessage: string): string {
   if (__DEV__) {
-    const localhostHint = LOCALHOST_API_PATTERN.test(API_BASE)
+    const debugApiBase = getApiBaseForDebug();
+    const localhostHint = LOCALHOST_API_PATTERN.test(debugApiBase)
       ? ' On a physical phone, localhost points to the phone itself. Run "npm run dev:phone" or set EXPO_PUBLIC_API_URL to your Mac LAN IP.'
       : "";
-    return `${baseMessage} API URL is ${API_BASE}. Health check: ${API_BASE}/api/health.${localhostHint}`;
+    return `${baseMessage} API URL is ${debugApiBase}. Health check: ${debugApiBase}/api/health.${localhostHint}`;
   }
 
   return `${baseMessage} Verify the API server is running and reachable from your phone.`;
@@ -240,7 +444,7 @@ export function reportError(context: ErrorReportContext) {
       } = await supabase.auth.getSession();
       if (!session?.access_token) return;
 
-      const url = `${API_BASE}/api/support/ticket`;
+      const url = `${getActiveApiBase()}/api/support/ticket`;
       await fetchWithTimeout(
         url,
         {
@@ -492,6 +696,8 @@ export async function submitBulkResults(
   const res = await authFetch(`/api/inspections/${inspectionId}/bulk`, {
     method: "POST",
     json: { results, completionTier, notes, events, effectiveCoverage },
+    timeoutMs: 60_000,
+    noRetry: true,
   });
   return res.json();
 }
@@ -507,6 +713,91 @@ export async function deleteInspectionFinding(
   const res = await authFetch(`/api/inspections/${inspectionId}/findings`, {
     method: "DELETE",
     json: payload as unknown as Record<string, unknown>,
+    noRetry: true,
+  });
+  return res.json();
+}
+
+export async function updateInspectionFinding(
+  inspectionId: string,
+  payload: {
+    resultId: string;
+    findingId?: string;
+    findingIndex?: number;
+    description: string;
+    severity?: string;
+    category?: string;
+    itemType?: string;
+    restockQuantity?: number;
+    supplyItemId?: string;
+    imageUrl?: string | null;
+    videoUrl?: string | null;
+    evidenceItems?: Array<{
+      id: string;
+      kind: "photo" | "video";
+      url: string;
+      thumbnailUrl?: string;
+      durationMs?: number;
+      createdAt?: string;
+    }>;
+    source?: string;
+    derivedFromFindingId?: string | null;
+    derivedFromComparisonId?: string | null;
+    origin?: string;
+  },
+) {
+  const res = await authFetch(`/api/inspections/${inspectionId}/findings`, {
+    method: "PATCH",
+    json: payload as unknown as Record<string, unknown>,
+  });
+  return res.json();
+}
+
+/**
+ * Get-or-create a room-level anchor inspectionResult for manual/action items.
+ * Returns the anchor's resultId which should be used instead of random baseline results.
+ */
+export async function resolveRoomAnchor(
+  inspectionId: string,
+  roomId: string,
+): Promise<{ anchorId: string; isNew: boolean; findingsCount: number }> {
+  const res = await authFetch(`/api/inspections/${inspectionId}/room-anchor`, {
+    method: "POST",
+    json: { roomId } as Record<string, unknown>,
+  });
+  return res.json();
+}
+
+export async function addInspectionFinding(
+  inspectionId: string,
+  payload: {
+    resultId: string;
+    description: string;
+    severity?: string;
+    category?: string;
+    itemType?: string;
+    restockQuantity?: number;
+    supplyItemId?: string;
+    imageUrl?: string;
+    videoUrl?: string;
+    evidenceItems?: Array<{
+      id: string;
+      kind: "photo" | "video";
+      url: string;
+      thumbnailUrl?: string;
+      durationMs?: number;
+      createdAt?: string;
+    }>;
+    source?: string;
+    derivedFromFindingId?: string;
+    derivedFromComparisonId?: string;
+    origin?: string;
+  },
+) {
+  const res = await authFetch(`/api/inspections/${inspectionId}/findings`, {
+    method: "POST",
+    json: payload as unknown as Record<string, unknown>,
+    noRetry: true,
   });
   return res.json();
 }
@@ -565,6 +856,106 @@ export async function getRooms(propertyId: string) {
 }
 
 // ============================================================================
+// Supply & Restock
+// ============================================================================
+
+export async function getPropertySupplies(propertyId: string, category?: string) {
+  const params = category ? `?category=${encodeURIComponent(category)}` : "";
+  const res = await authFetch(`/api/properties/${propertyId}/supplies${params}`);
+  return res.json();
+}
+
+export async function createSupplyItem(propertyId: string, item: {
+  name: string;
+  category: string;
+  amazonAsin?: string;
+  amazonUrl?: string;
+  defaultQuantity?: number;
+  parLevel?: number;
+  unit?: string;
+  vendor?: string;
+  notes?: string;
+  roomId?: string;
+}) {
+  const res = await authFetch(`/api/properties/${propertyId}/supplies`, {
+    method: "POST",
+    json: item,
+  });
+  return res.json();
+}
+
+export async function updateSupplyItem(propertyId: string, supplyItemId: string, updates: Record<string, unknown>) {
+  const res = await authFetch(`/api/properties/${propertyId}/supplies`, {
+    method: "PATCH",
+    json: { supplyItemId, ...updates },
+  });
+  return res.json();
+}
+
+export async function deleteSupplyItem(propertyId: string, supplyItemId: string) {
+  const res = await authFetch(`/api/properties/${propertyId}/supplies`, {
+    method: "DELETE",
+    json: { supplyItemId },
+  });
+  return res.json();
+}
+
+export async function getRestockOrders(propertyId: string, status?: string) {
+  const params = status ? `?status=${encodeURIComponent(status)}` : "";
+  const res = await authFetch(`/api/properties/${propertyId}/restock${params}`);
+  return res.json();
+}
+
+export async function createRestockOrder(propertyId: string, order: {
+  inspectionId?: string;
+  items: Array<{
+    name: string;
+    supplyItemId?: string;
+    amazonAsin?: string;
+    quantity?: number;
+    roomName?: string;
+    source?: string;
+  }>;
+  notes?: string;
+}) {
+  const res = await authFetch(`/api/properties/${propertyId}/restock`, {
+    method: "POST",
+    json: order,
+  });
+  return res.json();
+}
+
+export async function updateRestockOrder(propertyId: string, orderId: string, updates: {
+  status?: string;
+  itemUpdates?: Array<{ itemId: string; status?: string; quantity?: number }>;
+  notes?: string;
+}) {
+  const res = await authFetch(`/api/properties/${propertyId}/restock/${orderId}`, {
+    method: "PATCH",
+    json: updates,
+  });
+  return res.json();
+}
+
+export async function dispatchRestockOrder(propertyId: string, orderId: string, dispatch: {
+  vendorId: string;
+  method: "email" | "sms";
+  message?: string;
+}) {
+  const res = await authFetch(`/api/properties/${propertyId}/restock/${orderId}/dispatch`, {
+    method: "POST",
+    json: dispatch,
+  });
+  return res.json();
+}
+
+export async function getPropertyVendors(propertyId: string, category?: string) {
+  const params = category ? `?category=${encodeURIComponent(category)}` : "";
+  const res = await authFetch(`/api/properties/${propertyId}/vendors${params}`);
+  return res.json();
+}
+
+// ============================================================================
 // Upload
 // ============================================================================
 
@@ -589,7 +980,6 @@ export async function uploadImageFile(
   propertyId: string,
   fileName?: string,
 ) {
-  const resolvedName = fileName || `training-keyframe-${Date.now()}.jpg`;
   try {
     // Read the local thumbnail directly from Expo's file API to avoid
     // 0-byte uploads that can happen when piping file:// URIs through fetch().
@@ -599,13 +989,43 @@ export async function uploadImageFile(
     }
 
     const base64 = await file.base64();
+    const mimeFromFile = typeof file.type === "string" ? file.type : "";
+    const lowerUri = imageUri.toLowerCase();
+    const contentType =
+      mimeFromFile && mimeFromFile.startsWith("image/")
+        ? mimeFromFile
+        : lowerUri.endsWith(".png")
+          ? "image/png"
+          : lowerUri.endsWith(".webp")
+            ? "image/webp"
+            : lowerUri.endsWith(".gif")
+              ? "image/gif"
+              : lowerUri.endsWith(".heic")
+                ? "image/heic"
+                : lowerUri.endsWith(".heif")
+                  ? "image/heif"
+                  : "image/jpeg";
+
+    const extension =
+      contentType === "image/png"
+        ? "png"
+        : contentType === "image/webp"
+          ? "webp"
+          : contentType === "image/gif"
+            ? "gif"
+            : contentType === "image/heic"
+              ? "heic"
+              : contentType === "image/heif"
+                ? "heif"
+                : "jpg";
+    const resolvedName = fileName || `image-upload-${Date.now()}.${extension}`;
 
     if (!base64) {
       throw new ApiError(0, "Unable to read keyframe image from device storage");
     }
 
     return uploadBase64Image(
-      `data:image/jpeg;base64,${base64}`,
+      `data:${contentType};base64,${base64}`,
       propertyId,
       resolvedName,
     );

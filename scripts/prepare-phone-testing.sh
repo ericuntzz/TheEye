@@ -319,6 +319,11 @@ cleanup_temp_file() {
 
 smoke_check_properties() {
   local api_port="$1"
+
+  if [[ -z "${GATE_TEST_EMAIL:-}" ]]; then
+    echo "Skipping authenticated property smoke checks because GATE_TEST_EMAIL is not set." >&2
+    return 0
+  fi
   local token=""
   local create_body=""
   local list_body=""
@@ -411,7 +416,7 @@ restart_once_and_recheck() {
   local expo_port="$2"
   local restarted_ports=""
 
-  echo "Smoke check failed; restarting the phone-testing stack once..."
+  echo "Smoke check failed; restarting the phone-testing stack once..." >&2
   kill_port_listener "${api_port}"
   kill_port_listener "${expo_port}"
   sleep 2

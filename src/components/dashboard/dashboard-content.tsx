@@ -518,7 +518,7 @@ function InspectionsTab({
             Train a property first, then start your first inspection from the property detail page.
           </p>
           <Link href="/dashboard">
-            <Button variant="outline" className="gap-2 rounded-xl h-11 px-6">
+            <Button variant="outline" className="gap-2 h-11 px-6">
               <Home className="h-4 w-4" />
               View Properties
             </Button>
@@ -744,7 +744,7 @@ function ProfileTab({ user }: { user: User }) {
         <Button
           variant="outline"
           onClick={handleSignOut}
-          className="w-full gap-2 rounded-xl h-11 text-destructive hover:text-destructive hover:bg-destructive/5 border-destructive/20"
+          className="w-full gap-2 h-11 text-destructive hover:text-destructive hover:bg-destructive/5 border-destructive/20"
         >
           <LogOut className="h-4 w-4" />
           Sign Out
@@ -913,7 +913,7 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
       <p className="text-sm text-muted-foreground text-center max-w-[280px] mb-6">
         Add your first property, upload photos to train the AI, and start inspecting in minutes.
       </p>
-      <Button onClick={onAdd} className="gap-2 rounded-xl h-11 px-6">
+      <Button onClick={onAdd} className="gap-2 h-11 px-6">
         <Plus className="h-4 w-4" />
         Add Your First Property
       </Button>

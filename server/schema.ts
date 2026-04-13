@@ -235,13 +235,13 @@ export const inspectionResults = pgTable("inspection_results", {
     .references(() => rooms.id, { onDelete: "cascade" })
     .notNull(),
   baselineImageId: uuid("baseline_image_id")
-    .references(() => baselineImages.id, { onDelete: "cascade" })
-    .notNull(),
-  currentImageUrl: text("current_image_url").notNull(),
+    .references(() => baselineImages.id, { onDelete: "cascade" }),
+  currentImageUrl: text("current_image_url"),
   status: varchar("status").default("pending"), // pending, passed, flagged
   score: real("score"), // 0-100 for this room
   findings: jsonb("findings").$type<Finding[]>(),
   rawResponse: text("raw_response"), // Full AI response for debugging
+  isRoomAnchor: boolean("is_room_anchor").default(false), // true = room-level anchor for manual/action items
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => [
   index("idx_inspection_results_inspection_id").on(table.inspectionId),
@@ -344,6 +344,120 @@ export type Event = typeof events.$inferSelect;
 export type InsertEvent = typeof events.$inferInsert;
 
 // ============================================================================
+// Property Supply Items — per-property supply catalog
+// ============================================================================
+
+export const propertySupplyItems = pgTable("property_supply_items", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  propertyId: uuid("property_id")
+    .references(() => properties.id, { onDelete: "cascade" })
+    .notNull(),
+  roomId: uuid("room_id")
+    .references(() => rooms.id, { onDelete: "set null" }),
+  name: varchar("name").notNull(),
+  category: varchar("category").notNull(), // toiletry, cleaning, linen, kitchen, amenity, maintenance, other
+  amazonAsin: varchar("amazon_asin"),
+  amazonUrl: text("amazon_url"),
+  defaultQuantity: integer("default_quantity").notNull().default(1),
+  parLevel: integer("par_level"), // minimum stock level before restock triggered
+  currentStock: integer("current_stock"),
+  unit: varchar("unit").default("each"), // each, pack, set, roll, bottle
+  vendor: varchar("vendor"), // e.g., "Amazon", "Costco", "Local supplier"
+  notes: text("notes"),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("idx_supply_items_property").on(table.propertyId),
+  index("idx_supply_items_category").on(table.propertyId, table.category),
+]);
+
+export type PropertySupplyItem = typeof propertySupplyItems.$inferSelect;
+export type InsertPropertySupplyItem = typeof propertySupplyItems.$inferInsert;
+
+// ============================================================================
+// Restock Orders — generated from inspection findings or manual restock
+// ============================================================================
+
+export const restockOrders = pgTable("restock_orders", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  propertyId: uuid("property_id")
+    .references(() => properties.id, { onDelete: "cascade" })
+    .notNull(),
+  inspectionId: uuid("inspection_id")
+    .references(() => inspections.id, { onDelete: "set null" }),
+  userId: uuid("user_id")
+    .references(() => users.id, { onDelete: "set null" }),
+  status: varchar("status").notNull().default("draft"), // draft, confirmed, ordered, delivered, cancelled
+  amazonCartUrl: text("amazon_cart_url"),
+  totalItems: integer("total_items").default(0),
+  notes: text("notes"),
+  confirmedAt: timestamp("confirmed_at"),
+  orderedAt: timestamp("ordered_at"),
+  deliveredAt: timestamp("delivered_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("idx_restock_orders_property").on(table.propertyId),
+  index("idx_restock_orders_status").on(table.status),
+  index("idx_restock_orders_inspection").on(table.inspectionId),
+]);
+
+export type RestockOrder = typeof restockOrders.$inferSelect;
+export type InsertRestockOrder = typeof restockOrders.$inferInsert;
+
+// ============================================================================
+// Restock Order Items — line items linking to supply catalog
+// ============================================================================
+
+export const restockOrderItems = pgTable("restock_order_items", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  orderId: uuid("order_id")
+    .references(() => restockOrders.id, { onDelete: "cascade" })
+    .notNull(),
+  supplyItemId: uuid("supply_item_id")
+    .references(() => propertySupplyItems.id, { onDelete: "set null" }),
+  name: varchar("name").notNull(), // denormalized for order history
+  amazonAsin: varchar("amazon_asin"),
+  quantity: integer("quantity").notNull().default(1),
+  roomName: varchar("room_name"), // which room flagged the restock
+  source: varchar("source").notNull().default("manual"), // ai, manual, par_level
+  status: varchar("status").notNull().default("pending"), // pending, confirmed, removed
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("idx_restock_order_items_order").on(table.orderId),
+]);
+
+export type RestockOrderItem = typeof restockOrderItems.$inferSelect;
+export type InsertRestockOrderItem = typeof restockOrderItems.$inferInsert;
+
+// ============================================================================
+// Property Vendor Contacts — preferred vendors for each property
+// ============================================================================
+
+export const propertyVendors = pgTable("property_vendors", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  propertyId: uuid("property_id")
+    .references(() => properties.id, { onDelete: "cascade" })
+    .notNull(),
+  name: varchar("name").notNull(),
+  category: varchar("category").notNull(), // cleaning, maintenance, supplies, linen, landscaping, pool, pest_control, other
+  email: varchar("email"),
+  phone: varchar("phone"),
+  notes: text("notes"),
+  isPreferred: boolean("is_preferred").default(false),
+  isActive: boolean("is_active").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("idx_property_vendors_property").on(table.propertyId),
+  index("idx_property_vendors_category").on(table.category),
+]);
+
+export type PropertyVendor = typeof propertyVendors.$inferSelect;
+export type InsertPropertyVendor = typeof propertyVendors.$inferInsert;
+
+// ============================================================================
 // Types
 // ============================================================================
 
@@ -370,6 +484,31 @@ export interface Finding {
   roomName?: string;
   status?: "suggested" | "confirmed" | "dismissed";
   createdAt?: string;
+  /** For restock items: link to supply catalog */
+  supplyItemId?: string;
+  /** For restock items: quantity needed */
+  restockQuantity?: number;
+  /** For Add Item modal: structured item type */
+  itemType?: "restock" | "maintenance" | "task" | "note";
+  /** Optional photo evidence URL for manual items */
+  imageUrl?: string;
+  /** Optional video evidence URL for manual items */
+  videoUrl?: string;
+  /** Multi-evidence attachments (additive — legacy imageUrl/videoUrl still read) */
+  evidenceItems?: Array<{
+    id: string;
+    kind: "photo" | "video";
+    url: string;
+    thumbnailUrl?: string;
+    durationMs?: number;
+    createdAt?: string;
+  }>;
+  /** Provenance: ID of the AI finding this item was derived from */
+  derivedFromFindingId?: string;
+  /** Provenance: ID of the comparison that produced the source finding */
+  derivedFromComparisonId?: string;
+  /** How this item was created */
+  origin?: "manual" | "ai_prompt_accept" | "template";
 }
 
 // ============================================================================
@@ -428,6 +567,9 @@ export const propertiesRelations = relations(properties, ({ one, many }) => ({
   conditions: many(propertyConditions),
   guestStays: many(guestStays),
   findingFeedback: many(findingFeedback),
+  supplyItems: many(propertySupplyItems),
+  restockOrders: many(restockOrders),
+  vendors: many(propertyVendors),
 }));
 
 export const roomsRelations = relations(rooms, ({ one, many }) => ({
@@ -520,6 +662,52 @@ export const propertyConditionsRelations = relations(propertyConditions, ({ one 
 export const guestStaysRelations = relations(guestStays, ({ one }) => ({
   property: one(properties, {
     fields: [guestStays.propertyId],
+    references: [properties.id],
+  }),
+}));
+
+export const propertySupplyItemsRelations = relations(propertySupplyItems, ({ one, many }) => ({
+  property: one(properties, {
+    fields: [propertySupplyItems.propertyId],
+    references: [properties.id],
+  }),
+  room: one(rooms, {
+    fields: [propertySupplyItems.roomId],
+    references: [rooms.id],
+  }),
+  orderItems: many(restockOrderItems),
+}));
+
+export const restockOrdersRelations = relations(restockOrders, ({ one, many }) => ({
+  property: one(properties, {
+    fields: [restockOrders.propertyId],
+    references: [properties.id],
+  }),
+  inspection: one(inspections, {
+    fields: [restockOrders.inspectionId],
+    references: [inspections.id],
+  }),
+  user: one(users, {
+    fields: [restockOrders.userId],
+    references: [users.id],
+  }),
+  items: many(restockOrderItems),
+}));
+
+export const restockOrderItemsRelations = relations(restockOrderItems, ({ one }) => ({
+  order: one(restockOrders, {
+    fields: [restockOrderItems.orderId],
+    references: [restockOrders.id],
+  }),
+  supplyItem: one(propertySupplyItems, {
+    fields: [restockOrderItems.supplyItemId],
+    references: [propertySupplyItems.id],
+  }),
+}));
+
+export const propertyVendorsRelations = relations(propertyVendors, ({ one }) => ({
+  property: one(properties, {
+    fields: [propertyVendors.propertyId],
     references: [properties.id],
   }),
 }));

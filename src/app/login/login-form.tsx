@@ -175,7 +175,8 @@ export function LoginForm() {
               <div className="pt-1">
                 <Button
                   type="submit"
-                  className="w-full h-12 rounded-xl text-sm font-semibold gap-2"
+                  className="w-full gap-2"
+                  size="lg"
                   disabled={loading}
                 >
                   {loading ? (
@@ -198,7 +199,7 @@ export function LoginForm() {
               {isSignUp ? "Already have an account?" : "Don't have an account?"}{" "}
               <button
                 type="button"
-                className="text-primary font-medium hover:text-primary/80 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary rounded-sm"
+                className="text-primary font-medium hover:text-primary/80 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary rounded-xl"
                 onClick={() => {
                   setIsSignUp(!isSignUp);
                   setError(null);

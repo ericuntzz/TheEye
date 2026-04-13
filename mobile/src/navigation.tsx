@@ -17,6 +17,7 @@ import PropertyDetailScreen from "./screens/PropertyDetail";
 import ProfileScreen from "./screens/Profile";
 import ReportIssueScreen from "./screens/ReportIssue";
 import type { ImageSourceType } from "./lib/image-source/types";
+import type { FindingEvidenceItem } from "./lib/inspection/item-types";
 
 export type InspectionMode =
   | "turnover"
@@ -35,11 +36,21 @@ export interface SummaryFindingData {
   source?: "manual_note" | "ai";
   resultId?: string;
   findingIndex?: number;
+  itemType?: "note" | "restock" | "maintenance" | "task";
+  restockQuantity?: number;
+  supplyItemId?: string;
+  imageUrl?: string;
+  videoUrl?: string;
+  evidenceItems?: FindingEvidenceItem[];
+  derivedFromFindingId?: string;
+  derivedFromComparisonId?: string;
+  origin?: "manual" | "ai_prompt_accept" | "template";
 }
 
 export interface SummaryRoomData {
   roomId: string;
   roomName: string;
+  resultId?: string;
   score: number | null;
   coverage: number;
   anglesScanned: number;

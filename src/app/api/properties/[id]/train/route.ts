@@ -1362,30 +1362,40 @@ async function analyzePropertyImages(
   try {
     const imagesToAnalyze = imageUrls.slice(0, 10);
     const imageContents = [];
-
-    for (const url of imagesToAnalyze) {
-      try {
+    const loadedImages = await Promise.allSettled(
+      imagesToAnalyze.map(async (url) => {
         if (!isSafeUrl(url)) {
           console.warn("[train] Blocked unsafe URL:", url);
-          continue;
+          return null;
         }
+
         const imgRes = await fetch(url, { signal: AbortSignal.timeout(30000) });
-        if (!imgRes.ok) continue;
+        if (!imgRes.ok) return null;
+
         const buffer = await imgRes.arrayBuffer();
         const base64 = Buffer.from(buffer).toString("base64");
         const contentType =
           imgRes.headers.get("content-type") || "image/jpeg";
 
-        imageContents.push({
+        return {
           type: "image" as const,
           source: {
             type: "base64" as const,
             media_type: contentType.split(";")[0].trim(),
             data: base64,
           },
-        });
-      } catch (fetchErr) {
-        console.warn("[train] Skipping image that failed to fetch:", fetchErr instanceof Error ? fetchErr.message : fetchErr);
+        };
+      }),
+    );
+
+    for (const settled of loadedImages) {
+      if (settled.status === "fulfilled" && settled.value) {
+        imageContents.push(settled.value);
+      } else if (settled.status === "rejected") {
+        console.warn(
+          "[train] Skipping image that failed to fetch:",
+          settled.reason instanceof Error ? settled.reason.message : settled.reason,
+        );
       }
     }
 

@@ -14,15 +14,33 @@
 
 import { MotionFilter } from "../sensors/motion-filter";
 import { ChangeDetector, type ChangeDetectionResult } from "./change-detector";
+import type { FindingEvidenceItem } from "../inspection/item-types";
 
 export interface ComparisonFinding {
   category: string;
   description: string;
   severity: string;
   confidence: number;
+  source?: "manual_note" | "ai";
   findingCategory: string;
   isClaimable: boolean;
   objectClass?: string;
+  itemType?: "note" | "restock" | "maintenance" | "task";
+  restockQuantity?: number;
+  /** Resolved supply catalog item ID (enriched during restock flow) */
+  supplyItemId?: string;
+  /** Attached photo URL — legacy single-attachment */
+  imageUrl?: string;
+  /** Attached video URL — legacy single-attachment */
+  videoUrl?: string;
+  /** Multi-evidence attachments */
+  evidenceItems?: FindingEvidenceItem[];
+  /** Provenance: AI finding this was derived from */
+  derivedFromFindingId?: string;
+  /** Provenance: comparison that produced the source */
+  derivedFromComparisonId?: string;
+  /** How this item was created */
+  origin?: "manual" | "ai_prompt_accept" | "template";
 }
 
 export interface ComparisonDiagnostics {

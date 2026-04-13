@@ -20,7 +20,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { getProperties, createProperty, bulkDeleteProperties } from "../lib/api";
 import { supabase } from "../lib/supabase";
 import type { RootStackParamList } from "../navigation";
-import { colors, radius, shadows } from '../lib/tokens';
+import { colors, radius, shadows, fontSize, spacing } from '../lib/tokens';
 
 type Nav = NativeStackNavigationProp<RootStackParamList, "Properties">;
 
@@ -475,7 +475,7 @@ export default function PropertiesScreen() {
                       prefillScreen: "Properties",
                     })
                   }
-                  style={{ marginTop: 12 }}
+                  style={{ marginTop: spacing.content }}
                 >
                   <Text style={styles.reportLink}>Report this issue</Text>
                 </TouchableOpacity>
@@ -526,7 +526,7 @@ export default function PropertiesScreen() {
             activeOpacity={0.7}
           >
             {bulkDeleting ? (
-              <ActivityIndicator size="small" color="#fff" />
+              <ActivityIndicator size="small" color={colors.primaryForeground} />
             ) : (
               <Text style={styles.selectionDeleteText}>Delete</Text>
             )}
@@ -663,11 +663,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: colors.background,
-    gap: 12,
+    gap: spacing.content,
   },
   loadingText: {
     color: colors.muted,
-    fontSize: 14,
+    fontSize: fontSize.label,
   },
 
   // Header
@@ -675,31 +675,31 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    paddingHorizontal: 20,
-    paddingBottom: 20,
-    paddingTop: 8,
+    paddingHorizontal: spacing.screen,
+    paddingBottom: spacing.screen,
+    paddingTop: spacing.sm,
   },
   title: {
-    fontSize: 30,
+    fontSize: fontSize.screenTitle,
     fontWeight: "600",
     color: colors.heading,
     letterSpacing: -0.5,
   },
   subtitle: {
-    fontSize: 14,
+    fontSize: fontSize.label,
     color: colors.muted,
-    marginTop: 2,
+    marginTop: spacing.xxs,
     fontWeight: "500",
   },
   headerActions: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
-    marginTop: 4,
+    gap: spacing.content,
+    marginTop: spacing.xs,
   },
   selectButton: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingHorizontal: spacing.card,
+    paddingVertical: spacing.sm,
     borderRadius: radius.sm,
     backgroundColor: colors.secondary,
     borderWidth: 1,
@@ -707,7 +707,7 @@ const styles = StyleSheet.create({
   },
   selectButtonText: {
     color: colors.muted,
-    fontSize: 14,
+    fontSize: fontSize.label,
     fontWeight: "600",
   },
   selectButtonTextActive: {
@@ -716,23 +716,23 @@ const styles = StyleSheet.create({
   profileAvatar: {
     width: 36,
     height: 36,
-    borderRadius: 18,
+    borderRadius: radius.full,
     backgroundColor: colors.heading,
     justifyContent: "center",
     alignItems: "center",
     ...shadows.card,
   },
   profileAvatarText: {
-    color: "#fff",
-    fontSize: 15,
+    color: colors.primaryForeground,
+    fontSize: fontSize.body,
     fontWeight: "600",
   },
 
   // List
   list: {
-    paddingHorizontal: 20,
+    paddingHorizontal: spacing.screen,
     paddingBottom: 100,
-    gap: 12,
+    gap: spacing.content,
   },
 
   // Card
@@ -747,37 +747,37 @@ const styles = StyleSheet.create({
   },
   cardSelected: {
     borderColor: colors.primary,
-    backgroundColor: "rgba(77, 166, 255, 0.04)",
+    backgroundColor: colors.primaryBg,
   },
   cardAccent: {
     width: 4,
   },
   cardContent: {
     flex: 1,
-    padding: 18,
-    paddingLeft: 16,
+    padding: spacing.container,
+    paddingLeft: spacing.md,
   },
   cardHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    marginBottom: 12,
+    marginBottom: spacing.content,
     minWidth: 0,
   },
   cardTitleArea: {
     flex: 1,
-    marginRight: 12,
+    marginRight: spacing.content,
     minWidth: 0,
   },
   propertyName: {
-    fontSize: 18,
+    fontSize: fontSize.h3,
     fontWeight: "600",
     color: colors.heading,
     letterSpacing: -0.2,
   },
   address: {
     color: colors.muted,
-    fontSize: 13,
+    fontSize: fontSize.sm,
     marginTop: 3,
     flexShrink: 1,
   },
@@ -789,7 +789,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   checkboxAreaSelected: {
-    backgroundColor: "rgba(77, 166, 255, 0.08)",
+    backgroundColor: colors.primaryBg,
   },
   checkbox: {
     width: 22,
@@ -805,15 +805,15 @@ const styles = StyleSheet.create({
     borderColor: colors.primary,
   },
   checkmark: {
-    color: "#fff",
-    fontSize: 14,
+    color: colors.primaryForeground,
+    fontSize: fontSize.label,
     fontWeight: "700",
   },
 
   // Edit button
   editButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingHorizontal: spacing.content,
+    paddingVertical: spacing.tight,
     borderRadius: radius.sm,
     backgroundColor: colors.secondary,
     borderWidth: 1,
@@ -821,7 +821,7 @@ const styles = StyleSheet.create({
   },
   editButtonText: {
     color: colors.muted,
-    fontSize: 12,
+    fontSize: fontSize.caption,
     fontWeight: "600",
   },
 
@@ -829,24 +829,24 @@ const styles = StyleSheet.create({
   badge: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 10,
+    gap: spacing.tight,
+    paddingHorizontal: spacing.element,
     paddingVertical: 5,
     borderRadius: radius.sm,
   },
   badgeTrained: {
-    backgroundColor: "rgba(74, 222, 128, 0.1)",
+    backgroundColor: colors.successBg,
   },
   badgeUntrained: {
-    backgroundColor: "rgba(77, 166, 255, 0.1)",
+    backgroundColor: colors.primaryBg,
   },
   badgeDot: {
     width: 6,
     height: 6,
-    borderRadius: 3,
+    borderRadius: radius.full,
   },
   badgeText: {
-    fontSize: 12,
+    fontSize: fontSize.caption,
     fontWeight: "600",
     letterSpacing: 0.3,
   },
@@ -854,31 +854,31 @@ const styles = StyleSheet.create({
   // Details
   detailsRow: {
     flexDirection: "row",
-    gap: 8,
+    gap: spacing.sm,
     flexWrap: "wrap",
   },
   detailChip: {
     backgroundColor: colors.secondary,
     borderRadius: radius.sm,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingHorizontal: spacing.element,
+    paddingVertical: spacing.xs,
     borderWidth: 1,
     borderColor: colors.cardBorder,
   },
   detailText: {
     color: colors.muted,
-    fontSize: 12,
+    fontSize: fontSize.caption,
     fontWeight: "500",
   },
 
   // FAB
   fab: {
     position: "absolute",
-    bottom: 32,
-    right: 20,
+    bottom: spacing.xl,
+    right: spacing.screen,
     width: 56,
     height: 56,
-    borderRadius: 28,
+    borderRadius: radius.full,
     backgroundColor: colors.primary,
     justifyContent: "center",
     alignItems: "center",
@@ -886,9 +886,9 @@ const styles = StyleSheet.create({
   },
   fabIcon: {
     color: colors.primaryForeground,
-    fontSize: 28,
+    fontSize: fontSize.pageTitle,
     fontWeight: "400",
-    marginTop: -2,
+    marginTop: -spacing.xxs,
   },
 
   // Selection bottom bar
@@ -900,8 +900,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingHorizontal: spacing.screen,
+    paddingVertical: spacing.md,
     paddingBottom: 34,
     backgroundColor: colors.card,
     borderTopWidth: 1,
@@ -910,20 +910,20 @@ const styles = StyleSheet.create({
   },
   selectionBarText: {
     color: colors.heading,
-    fontSize: 15,
+    fontSize: fontSize.body,
     fontWeight: "600",
   },
   selectionDeleteButton: {
     backgroundColor: colors.error,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
+    paddingHorizontal: spacing.screen,
+    paddingVertical: spacing.element,
     borderRadius: radius.md,
     minWidth: 80,
     alignItems: "center",
   },
   selectionDeleteText: {
-    color: "#fff",
-    fontSize: 15,
+    color: colors.primaryForeground,
+    fontSize: fontSize.body,
     fontWeight: "600",
   },
 
@@ -931,12 +931,12 @@ const styles = StyleSheet.create({
   sortSheetWrap: {
     ...StyleSheet.absoluteFillObject,
     justifyContent: "flex-end",
-    padding: 20,
+    padding: spacing.screen,
   },
   sortSheet: {
     backgroundColor: colors.card,
     borderRadius: radius.xl,
-    padding: 20,
+    padding: spacing.screen,
     borderWidth: 1,
     borderColor: colors.stone,
     ...shadows.elevated,
@@ -945,21 +945,21 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingVertical: 14,
-    paddingHorizontal: 14,
+    paddingVertical: spacing.card,
+    paddingHorizontal: spacing.card,
     borderRadius: radius.md,
     backgroundColor: colors.secondary,
     borderWidth: 1,
     borderColor: colors.cardBorder,
-    marginTop: 10,
+    marginTop: spacing.element,
   },
   sortOptionSelected: {
     borderColor: colors.primary,
-    backgroundColor: "rgba(77, 166, 255, 0.08)",
+    backgroundColor: colors.primaryBg,
   },
   sortOptionText: {
     color: colors.heading,
-    fontSize: 15,
+    fontSize: fontSize.body,
     fontWeight: "500",
   },
   sortOptionTextSelected: {
@@ -968,70 +968,70 @@ const styles = StyleSheet.create({
   },
   sortOptionCheck: {
     color: colors.primary,
-    fontSize: 16,
+    fontSize: fontSize.bodyLg,
     fontWeight: "700",
   },
 
   modalOverlay: {
     flex: 1,
     justifyContent: "center",
-    paddingHorizontal: 24,
+    paddingHorizontal: spacing.lg,
   },
   modalBackdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    backgroundColor: colors.camera.overlay,
   },
   modalContent: {
     backgroundColor: colors.card,
     borderRadius: radius.xl,
-    padding: 24,
+    padding: spacing.lg,
     width: "100%",
     maxWidth: 400,
     ...shadows.elevated,
   },
   modalTitle: {
-    fontSize: 22,
+    fontSize: fontSize.modalTitle,
     fontWeight: "600",
     color: colors.heading,
     letterSpacing: -0.3,
-    marginBottom: 4,
+    marginBottom: spacing.xs,
   },
   modalSubtitle: {
-    fontSize: 14,
+    fontSize: fontSize.label,
     color: colors.muted,
-    marginBottom: 20,
+    marginBottom: spacing.screen,
   },
   modalLabel: {
-    fontSize: 13,
+    fontSize: fontSize.sm,
     color: colors.heading,
     fontWeight: "600",
-    marginBottom: 8,
+    marginBottom: spacing.sm,
   },
   modalInput: {
     backgroundColor: colors.secondary,
     borderWidth: 1,
     borderColor: colors.stone,
     borderRadius: radius.lg,
-    paddingHorizontal: 14,
+    paddingHorizontal: spacing.card,
     paddingVertical: 13,
     color: colors.foreground,
-    fontSize: 16,
+    fontSize: fontSize.bodyLg,
     fontWeight: "500",
-    marginBottom: 20,
+    marginBottom: spacing.screen,
   },
   modalInputError: {
     borderColor: colors.error,
   },
   modalErrorText: {
     color: colors.error,
-    fontSize: 12,
+    fontSize: fontSize.caption,
     fontWeight: "500",
-    marginTop: -12,
-    marginBottom: 12,
+    marginTop: -spacing.content,
+    marginBottom: spacing.content,
   },
   modalActions: {
     flexDirection: "row",
-    gap: 12,
+    gap: spacing.content,
   },
   modalCancelButton: {
     flex: 1,
@@ -1044,7 +1044,7 @@ const styles = StyleSheet.create({
   },
   modalCancelText: {
     color: colors.muted,
-    fontSize: 15,
+    fontSize: fontSize.body,
     fontWeight: "600",
   },
   modalCreateButton: {
@@ -1059,7 +1059,7 @@ const styles = StyleSheet.create({
   },
   modalCreateText: {
     color: colors.primaryForeground,
-    fontSize: 15,
+    fontSize: fontSize.body,
     fontWeight: "600",
   },
 
@@ -1068,22 +1068,22 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     paddingTop: 80,
-    paddingHorizontal: 40,
+    paddingHorizontal: spacing.safe,
   },
   emptyIcon: {
     width: 64,
     height: 64,
-    borderRadius: 32,
-    backgroundColor: "rgba(77, 166, 255, 0.08)",
+    borderRadius: radius.full,
+    backgroundColor: colors.primaryBg,
     borderWidth: 2,
-    borderColor: "rgba(77, 166, 255, 0.15)",
+    borderColor: colors.primaryBorder,
     borderStyle: "dashed",
     justifyContent: "center",
     alignItems: "center",
-    marginBottom: 20,
+    marginBottom: spacing.screen,
   },
   emptyIconText: {
-    fontSize: 28,
+    fontSize: fontSize.pageTitle,
     color: colors.primary,
     fontWeight: "400",
   },
@@ -1092,40 +1092,40 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   emptyIconRetryText: {
-    fontSize: 28,
+    fontSize: fontSize.pageTitle,
     color: colors.primary,
     fontWeight: "400",
   },
   emptyTitle: {
     color: colors.muted,
-    fontSize: 17,
+    fontSize: fontSize.button,
     fontWeight: "600",
     textAlign: "center",
-    marginBottom: 6,
+    marginBottom: spacing.tight,
   },
   emptySubtext: {
     color: colors.muted,
-    fontSize: 14,
+    fontSize: fontSize.label,
     textAlign: "center",
     lineHeight: 20,
   },
   retryButton: {
-    marginTop: 16,
-    paddingHorizontal: 24,
-    paddingVertical: 10,
+    marginTop: spacing.md,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.element,
     borderRadius: radius.md,
-    backgroundColor: "rgba(77, 166, 255, 0.12)",
+    backgroundColor: colors.primaryBgStrong,
     borderWidth: 1,
-    borderColor: "rgba(77, 166, 255, 0.25)",
+    borderColor: colors.primaryBorder,
   },
   retryButtonText: {
     color: colors.primary,
-    fontSize: 15,
+    fontSize: fontSize.body,
     fontWeight: "600",
   },
   reportLink: {
     color: colors.muted,
-    fontSize: 13,
+    fontSize: fontSize.sm,
     fontWeight: "500",
     textDecorationLine: "underline" as const,
   },

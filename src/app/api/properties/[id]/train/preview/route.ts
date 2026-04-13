@@ -89,36 +89,37 @@ export async function POST(
 
     // Build image content blocks
     const imageContents: Array<{ type: string; source?: { type: string; media_type: string; data: string }; text?: string }> = [];
-    let loadedCount = 0;
-
-    for (const url of imageUrls.slice(0, 10)) { // Max 10 images per preview
-      try {
-        if (!isSafeUrl(url)) continue;
+    const loadedImages = await Promise.allSettled(
+      imageUrls.slice(0, 10).map(async (url) => {
+        if (!isSafeUrl(url)) return null;
         const res = await fetch(url, {
           signal: AbortSignal.timeout(8000),
           redirect: "error",
         });
-        if (!res.ok) continue;
+        if (!res.ok) return null;
         const buffer = Buffer.from(await res.arrayBuffer());
         const contentType = res.headers.get("content-type")?.split(";")[0]?.trim() || "image/jpeg";
         const base64 = buffer.toString("base64");
-        if (base64.length < 100) continue;
+        if (base64.length < 100) return null;
 
-        imageContents.push({
+        return {
           type: "image",
           source: {
-            type: "base64",
+            type: "base64" as const,
             media_type: contentType,
             data: base64,
           },
-        });
-        loadedCount++;
-      } catch {
-        // Skip failed images
+        };
+      }),
+    );
+
+    for (const settled of loadedImages) {
+      if (settled.status === "fulfilled" && settled.value) {
+        imageContents.push(settled.value);
       }
     }
 
-    if (loadedCount === 0) {
+    if (imageContents.length === 0) {
       return NextResponse.json({
         rooms: [],
         itemCount: 0,

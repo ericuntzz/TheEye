@@ -45,6 +45,14 @@
     "plugins": [
       "expo-dev-client",
       "expo-image",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Atria needs photo library access so you can attach inspection evidence from your device.",
+          "cameraPermission": "Atria needs camera access so you can capture inspection evidence.",
+          "microphonePermission": "Atria needs microphone access when recording inspection videos."
+        }
+      ],
       "expo-secure-store",
       [
         "expo-camera",

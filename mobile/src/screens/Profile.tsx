@@ -12,7 +12,7 @@ import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation";
 import { supabase } from "../lib/supabase";
-import { colors, radius, shadows } from "../lib/tokens";
+import { colors, radius, shadows, fontSize, spacing } from "../lib/tokens";
 
 type Nav = NativeStackNavigationProp<RootStackParamList, "Profile">;
 
@@ -132,47 +132,47 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: 20,
-    paddingVertical: 12,
+    paddingHorizontal: spacing.screen,
+    paddingVertical: spacing.content,
   },
   backButton: {
     minWidth: 60,
   },
   backButtonText: {
     color: colors.muted,
-    fontSize: 16,
+    fontSize: fontSize.bodyLg,
     fontWeight: "500",
   },
   headerTitle: {
-    fontSize: 17,
+    fontSize: fontSize.button,
     fontWeight: "600",
     color: colors.heading,
   },
   content: {
-    padding: 20,
-    paddingTop: 32,
+    padding: spacing.screen,
+    paddingTop: spacing.xl,
   },
   avatarSection: {
     alignItems: "center",
-    marginBottom: 40,
+    marginBottom: spacing.safe,
   },
   avatar: {
     width: 80,
     height: 80,
-    borderRadius: 40,
+    borderRadius: radius.full,
     backgroundColor: colors.heading,
     justifyContent: "center",
     alignItems: "center",
-    marginBottom: 16,
+    marginBottom: spacing.md,
     ...shadows.elevated,
   },
   avatarText: {
-    color: "#fff",
+    color: colors.primaryForeground,
     fontSize: 32,
     fontWeight: "600",
   },
   email: {
-    fontSize: 16,
+    fontSize: fontSize.bodyLg,
     color: colors.muted,
     fontWeight: "500",
   },
@@ -182,23 +182,23 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.stone,
     overflow: "hidden",
-    marginBottom: 32,
+    marginBottom: spacing.xl,
     ...shadows.card,
   },
   menuItem: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: 20,
-    paddingVertical: 18,
+    paddingHorizontal: spacing.screen,
+    paddingVertical: spacing.container,
   },
   menuItemText: {
-    fontSize: 16,
+    fontSize: fontSize.bodyLg,
     fontWeight: "500",
     color: colors.foreground,
   },
   menuItemArrow: {
-    fontSize: 16,
+    fontSize: fontSize.bodyLg,
     color: colors.muted,
   },
   menuItemDisabled: {
@@ -210,17 +210,17 @@ const styles = StyleSheet.create({
   menuItemLabelRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: spacing.element,
     flex: 1,
   },
   comingSoonBadge: {
-    backgroundColor: "rgba(148, 163, 184, 0.1)",
-    borderRadius: 6,
-    paddingHorizontal: 8,
+    backgroundColor: colors.primaryBg,
+    borderRadius: radius.full,
+    paddingHorizontal: spacing.sm,
     paddingVertical: 3,
   },
   comingSoonText: {
-    fontSize: 10,
+    fontSize: fontSize.badge,
     fontWeight: "600",
     color: colors.muted,
     letterSpacing: 0.3,
@@ -229,27 +229,27 @@ const styles = StyleSheet.create({
   menuDivider: {
     height: 1,
     backgroundColor: colors.stone,
-    marginHorizontal: 20,
+    marginHorizontal: spacing.screen,
     opacity: 0.5,
   },
   signOutButton: {
-    backgroundColor: "rgba(248, 113, 113, 0.1)",
+    backgroundColor: colors.errorBg,
     borderRadius: radius.lg,
-    paddingVertical: 16,
+    paddingVertical: spacing.md,
     alignItems: "center",
     borderWidth: 1,
-    borderColor: "rgba(248, 113, 113, 0.2)",
-    marginBottom: 24,
+    borderColor: colors.errorBorder,
+    marginBottom: spacing.lg,
   },
   signOutText: {
     color: colors.error,
-    fontSize: 16,
+    fontSize: fontSize.bodyLg,
     fontWeight: "600",
   },
   version: {
     textAlign: "center",
     color: colors.muted,
-    fontSize: 13,
+    fontSize: fontSize.sm,
     fontWeight: "500",
   },
 });

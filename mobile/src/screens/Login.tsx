@@ -10,7 +10,7 @@ import {
   Platform,
 } from "react-native";
 import { supabase } from "../lib/supabase";
-import { colors, radius, shadows } from '../lib/tokens';
+import { colors, radius, shadows, fontSize, spacing } from '../lib/tokens';
 import { AtriaMark } from "../components/AtriaMark";
 
 export default function LoginScreen() {
@@ -124,26 +124,26 @@ const styles = StyleSheet.create({
   inner: {
     flex: 1,
     justifyContent: "center",
-    paddingHorizontal: 28,
+    paddingHorizontal: spacing.section,
   },
 
   // Logo
   logoArea: {
     alignItems: "center",
-    marginBottom: 48,
+    marginBottom: spacing.xxl,
   },
   logoMark: {
-    marginBottom: 20,
+    marginBottom: spacing.screen,
   },
   appName: {
-    fontSize: 18,
+    fontSize: fontSize.h3,
     fontWeight: "600",
     color: colors.heading,
     letterSpacing: 5,
-    marginBottom: 6,
+    marginBottom: spacing.tight,
   },
   tagline: {
-    fontSize: 15,
+    fontSize: fontSize.body,
     color: colors.muted,
     fontWeight: "400",
     letterSpacing: 0.3,
@@ -151,42 +151,42 @@ const styles = StyleSheet.create({
 
   // Form
   formContainer: {
-    gap: 4,
+    gap: spacing.xs,
   },
   errorContainer: {
-    backgroundColor: "rgba(248, 113, 113, 0.1)",
+    backgroundColor: colors.errorBg,
     borderWidth: 1,
-    borderColor: "rgba(248, 113, 113, 0.25)",
+    borderColor: colors.errorBorder,
     borderRadius: radius.lg,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    marginBottom: 8,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.content,
+    marginBottom: spacing.sm,
   },
   errorText: {
     color: colors.error,
     textAlign: "center",
-    fontSize: 14,
+    fontSize: fontSize.label,
     fontWeight: "500",
   },
   inputGroup: {
-    marginBottom: 16,
+    marginBottom: spacing.md,
   },
   inputLabel: {
     color: colors.muted,
-    fontSize: 13,
+    fontSize: fontSize.sm,
     fontWeight: "600",
-    marginBottom: 8,
-    marginLeft: 4,
+    marginBottom: spacing.sm,
+    marginLeft: spacing.xs,
     letterSpacing: 0.3,
     textTransform: "uppercase",
   },
   input: {
     backgroundColor: colors.card,
     borderRadius: radius.lg,
-    paddingHorizontal: 18,
-    paddingVertical: 16,
+    paddingHorizontal: spacing.container,
+    paddingVertical: spacing.md,
     color: colors.foreground,
-    fontSize: 16,
+    fontSize: fontSize.bodyLg,
     borderWidth: 1.5,
     borderColor: colors.stone,
   },
@@ -195,7 +195,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     paddingVertical: 17,
     alignItems: "center",
-    marginTop: 12,
+    marginTop: spacing.content,
     ...shadows.card,
   },
   buttonDisabled: {
@@ -204,7 +204,7 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     color: colors.primaryForeground,
-    fontSize: 17,
+    fontSize: fontSize.button,
     fontWeight: "600",
     letterSpacing: 0.3,
   },
@@ -212,8 +212,8 @@ const styles = StyleSheet.create({
   // Footer
   version: {
     color: colors.muted,
-    fontSize: 12,
+    fontSize: fontSize.caption,
     textAlign: "center",
-    marginTop: 48,
+    marginTop: spacing.xxl,
   },
 });

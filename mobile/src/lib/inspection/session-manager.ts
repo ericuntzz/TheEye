@@ -9,6 +9,7 @@
  */
 
 import type { ComparisonFinding } from "../vision/comparison-manager";
+import type { FindingEvidenceItem } from "./item-types";
 
 export type InspectionMode =
   | "turnover"
@@ -32,6 +33,18 @@ export interface RoomFinding extends ComparisonFinding {
   baselineImageId?: string;
   dismissReason?: string;
   timestamp: number;
+  /** For restock items: quantity needed */
+  restockQuantity?: number;
+  /** Item type from Add Item modal */
+  itemType?: "note" | "restock" | "maintenance" | "task";
+  /** Multi-evidence attachments */
+  evidenceItems?: FindingEvidenceItem[];
+  /** Provenance: AI finding this was derived from */
+  derivedFromFindingId?: string;
+  /** Provenance: comparison that produced the source */
+  derivedFromComparisonId?: string;
+  /** How this item was created */
+  origin?: "manual" | "ai_prompt_accept" | "template";
 }
 
 export interface RoomVisit {
@@ -203,6 +216,46 @@ export class SessionManager {
           eventData.reason = dismissReason;
         }
         this.logEvent(`finding_${status}`, visit.roomId, eventData);
+        return;
+      }
+    }
+  }
+
+  /**
+   * Update finding details after manual edits in the Add Item flow.
+   */
+  updateFindingDetails(
+    findingId: string,
+    updates: Partial<
+      Pick<
+        RoomFinding,
+        | "description"
+        | "severity"
+        | "category"
+        | "source"
+        | "findingCategory"
+        | "itemType"
+        | "restockQuantity"
+        | "supplyItemId"
+        | "imageUrl"
+        | "videoUrl"
+        | "objectClass"
+        | "evidenceItems"
+        | "derivedFromFindingId"
+        | "derivedFromComparisonId"
+        | "origin"
+      >
+    >,
+  ) {
+    for (const visit of this.state.visitedRooms.values()) {
+      const finding = visit.findings.find((f) => f.id === findingId);
+      if (finding) {
+        Object.assign(finding, updates);
+        this.logEvent("finding_updated", visit.roomId, {
+          findingId,
+          category: updates.category ?? finding.category,
+          itemType: updates.itemType ?? finding.itemType,
+        });
         return;
       }
     }

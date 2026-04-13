@@ -14,7 +14,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
 import type { RootStackParamList } from "../navigation";
 import { getInspections } from "../lib/api";
-import { colors } from "../lib/tokens";
+import { colors, radius, fontSize, spacing } from "../lib/tokens";
 
 type Nav = NativeStackNavigationProp<RootStackParamList, "InspectionHistory">;
 type ScreenRoute = RouteProp<RootStackParamList, "InspectionHistory">;
@@ -190,34 +190,34 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
-    paddingHorizontal: 20,
+    paddingHorizontal: spacing.screen,
   },
   header: {
-    paddingTop: 6,
+    paddingTop: spacing.tight,
   },
   backButton: {
     alignSelf: "flex-start",
-    paddingVertical: 6,
-    paddingRight: 10,
+    paddingVertical: spacing.tight,
+    paddingRight: spacing.element,
   },
   backText: {
     color: colors.muted,
-    fontSize: 16,
+    fontSize: fontSize.bodyLg,
     fontWeight: "500",
   },
   title: {
     color: colors.heading,
-    fontSize: 28,
+    fontSize: fontSize.pageTitle,
     fontWeight: "600",
     letterSpacing: -0.4,
-    marginTop: 8,
+    marginTop: spacing.sm,
   },
   subtitle: {
     color: colors.muted,
-    fontSize: 14,
+    fontSize: fontSize.label,
     fontWeight: "500",
-    marginTop: 4,
-    marginBottom: 18,
+    marginTop: spacing.xs,
+    marginBottom: spacing.container,
   },
   center: {
     flex: 1,
@@ -225,16 +225,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   list: {
-    gap: 10,
-    paddingBottom: 40,
+    gap: spacing.element,
+    paddingBottom: spacing.safe,
   },
   card: {
     backgroundColor: colors.card,
-    borderRadius: 14,
+    borderRadius: radius.xl,
     borderWidth: 1,
     borderColor: colors.stone,
-    padding: 14,
-    gap: 8,
+    padding: spacing.card,
+    gap: spacing.sm,
   },
   cardHeader: {
     flexDirection: "row",
@@ -243,25 +243,25 @@ const styles = StyleSheet.create({
   },
   modeText: {
     color: colors.heading,
-    fontSize: 16,
+    fontSize: fontSize.bodyLg,
     fontWeight: "600",
   },
   statusBadge: {
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+    borderRadius: radius.full,
+    paddingHorizontal: spacing.element,
+    paddingVertical: spacing.xs,
     borderWidth: 1,
   },
   statusCompleted: {
-    backgroundColor: "rgba(74, 222, 128, 0.12)",
-    borderColor: "rgba(74, 222, 128, 0.28)",
+    backgroundColor: colors.successBg,
+    borderColor: colors.successBorder,
   },
   statusActive: {
-    backgroundColor: "rgba(77, 166, 255, 0.12)",
-    borderColor: "rgba(77, 166, 255, 0.28)",
+    backgroundColor: colors.primaryBgStrong,
+    borderColor: colors.primaryBorder,
   },
   statusText: {
-    fontSize: 12,
+    fontSize: fontSize.caption,
     fontWeight: "600",
     textTransform: "capitalize",
   },
@@ -278,55 +278,55 @@ const styles = StyleSheet.create({
   },
   metaLabel: {
     color: colors.muted,
-    fontSize: 13,
+    fontSize: fontSize.sm,
     fontWeight: "500",
   },
   metaValue: {
     color: colors.foreground,
-    fontSize: 13,
+    fontSize: fontSize.sm,
     fontWeight: "600",
   },
   errorCard: {
-    backgroundColor: "rgba(239, 68, 68, 0.08)",
+    backgroundColor: colors.errorBg,
     borderWidth: 1,
-    borderColor: "rgba(239, 68, 68, 0.25)",
-    borderRadius: 14,
-    padding: 14,
-    gap: 10,
+    borderColor: colors.errorBorder,
+    borderRadius: radius.xl,
+    padding: spacing.card,
+    gap: spacing.element,
   },
   errorText: {
     color: colors.error,
-    fontSize: 14,
+    fontSize: fontSize.label,
     fontWeight: "500",
   },
   retryButton: {
     alignSelf: "flex-start",
     backgroundColor: colors.error,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.content,
+    paddingVertical: spacing.sm,
   },
   retryText: {
     color: colors.primaryForeground,
-    fontSize: 13,
+    fontSize: fontSize.sm,
     fontWeight: "600",
   },
   emptyCard: {
     backgroundColor: colors.card,
-    borderRadius: 14,
+    borderRadius: radius.xl,
     borderWidth: 1,
     borderColor: colors.stone,
-    padding: 16,
-    gap: 6,
+    padding: spacing.md,
+    gap: spacing.tight,
   },
   emptyTitle: {
     color: colors.heading,
-    fontSize: 16,
+    fontSize: fontSize.bodyLg,
     fontWeight: "600",
   },
   emptyText: {
     color: colors.muted,
-    fontSize: 14,
+    fontSize: fontSize.label,
     fontWeight: "500",
   },
 });

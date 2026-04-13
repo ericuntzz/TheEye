@@ -17,7 +17,7 @@ import type { RouteProp } from "@react-navigation/native";
 import type { RootStackParamList } from "../navigation";
 import { supabase } from "../lib/supabase";
 import { submitSupportTicket } from "../lib/api";
-import { colors, radius, shadows } from "../lib/tokens";
+import { colors, radius, shadows, fontSize, spacing } from "../lib/tokens";
 
 type Nav = NativeStackNavigationProp<RootStackParamList, "ReportIssue">;
 type Route = RouteProp<RootStackParamList, "ReportIssue">;
@@ -109,7 +109,7 @@ export default function ReportIssueScreen() {
             Thanks for letting us know. We will look into this.
           </Text>
           <TouchableOpacity
-            style={[styles.submitButton, { marginTop: 24, paddingHorizontal: 40 }]}
+            style={[styles.submitButton, { marginTop: spacing.lg, paddingHorizontal: spacing.safe }]}
             onPress={() => navigation.goBack()}
             activeOpacity={0.8}
           >
@@ -238,54 +238,54 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: 20,
-    paddingVertical: 12,
+    paddingHorizontal: spacing.screen,
+    paddingVertical: spacing.content,
   },
   backButton: {
     minWidth: 60,
   },
   backButtonText: {
     color: colors.muted,
-    fontSize: 16,
+    fontSize: fontSize.bodyLg,
     fontWeight: "500",
   },
   headerTitle: {
-    fontSize: 17,
+    fontSize: fontSize.button,
     fontWeight: "600",
     color: colors.heading,
   },
 
   // Content
   content: {
-    padding: 20,
-    paddingTop: 8,
-    paddingBottom: 40,
+    padding: spacing.screen,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.safe,
   },
 
   // Error
   errorContainer: {
-    backgroundColor: "rgba(248, 113, 113, 0.1)",
+    backgroundColor: colors.errorBg,
     borderWidth: 1,
-    borderColor: "rgba(248, 113, 113, 0.25)",
+    borderColor: colors.errorBorder,
     borderRadius: radius.lg,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    marginBottom: 16,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.content,
+    marginBottom: spacing.md,
   },
   errorText: {
     color: colors.error,
     textAlign: "center",
-    fontSize: 14,
+    fontSize: fontSize.label,
     fontWeight: "500",
   },
 
   // Section
   sectionLabel: {
     color: colors.muted,
-    fontSize: 13,
+    fontSize: fontSize.sm,
     fontWeight: "600",
-    marginBottom: 10,
-    marginLeft: 4,
+    marginBottom: spacing.element,
+    marginLeft: spacing.xs,
     letterSpacing: 0.3,
     textTransform: "uppercase",
   },
@@ -293,12 +293,12 @@ const styles = StyleSheet.create({
   // Category Pills
   categoryRow: {
     flexDirection: "row",
-    gap: 10,
-    marginBottom: 24,
+    gap: spacing.element,
+    marginBottom: spacing.lg,
   },
   categoryPill: {
     flex: 1,
-    paddingVertical: 12,
+    paddingVertical: spacing.content,
     borderRadius: radius.lg,
     backgroundColor: colors.card,
     borderWidth: 1.5,
@@ -310,7 +310,7 @@ const styles = StyleSheet.create({
     borderColor: colors.primary,
   },
   categoryPillText: {
-    fontSize: 14,
+    fontSize: fontSize.label,
     fontWeight: "600",
     color: colors.muted,
   },
@@ -325,44 +325,44 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.stone,
     overflow: "hidden",
-    marginBottom: 8,
+    marginBottom: spacing.sm,
     ...shadows.card,
   },
   textInput: {
-    paddingHorizontal: 18,
-    paddingVertical: 16,
+    paddingHorizontal: spacing.container,
+    paddingVertical: spacing.md,
     color: colors.foreground,
-    fontSize: 15,
+    fontSize: fontSize.body,
     minHeight: 140,
     lineHeight: 22,
   },
   charHint: {
     color: colors.muted,
-    fontSize: 12,
-    marginLeft: 4,
-    marginBottom: 16,
+    fontSize: fontSize.caption,
+    marginLeft: spacing.xs,
+    marginBottom: spacing.md,
   },
 
   // Info Card
   infoCard: {
-    backgroundColor: "rgba(77, 166, 255, 0.06)",
+    backgroundColor: colors.primaryBg,
     borderRadius: radius.lg,
     borderWidth: 1,
-    borderColor: "rgba(77, 166, 255, 0.15)",
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    marginTop: 8,
-    marginBottom: 28,
+    borderColor: colors.primaryBorder,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.card,
+    marginTop: spacing.sm,
+    marginBottom: spacing.section,
   },
   infoTitle: {
-    fontSize: 12,
+    fontSize: fontSize.caption,
     fontWeight: "600",
     color: colors.primary,
-    marginBottom: 6,
+    marginBottom: spacing.tight,
     letterSpacing: 0.3,
   },
   infoText: {
-    fontSize: 13,
+    fontSize: fontSize.sm,
     color: colors.muted,
     lineHeight: 20,
   },
@@ -380,7 +380,7 @@ const styles = StyleSheet.create({
   },
   submitButtonText: {
     color: colors.primaryForeground,
-    fontSize: 17,
+    fontSize: fontSize.button,
     fontWeight: "600",
     letterSpacing: 0.3,
   },
@@ -390,32 +390,32 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    paddingHorizontal: 40,
+    paddingHorizontal: spacing.safe,
   },
   successCircle: {
     width: 72,
     height: 72,
-    borderRadius: 36,
-    backgroundColor: "rgba(74, 222, 128, 0.12)",
+    borderRadius: radius.full,
+    backgroundColor: colors.successBg,
     borderWidth: 2,
-    borderColor: "rgba(74, 222, 128, 0.3)",
+    borderColor: colors.successBorder,
     justifyContent: "center",
     alignItems: "center",
-    marginBottom: 20,
+    marginBottom: spacing.screen,
   },
   successCheck: {
     color: colors.success,
-    fontSize: 28,
+    fontSize: fontSize.pageTitle,
     fontWeight: "600",
   },
   successTitle: {
-    fontSize: 22,
+    fontSize: fontSize.modalTitle,
     fontWeight: "600",
     color: colors.heading,
-    marginBottom: 8,
+    marginBottom: spacing.sm,
   },
   successSubtitle: {
-    fontSize: 15,
+    fontSize: fontSize.body,
     color: colors.muted,
     textAlign: "center",
     lineHeight: 22,

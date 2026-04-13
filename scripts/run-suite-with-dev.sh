@@ -21,7 +21,8 @@ pick_available_port() {
     return 0
   fi
 
-  for offset in $(seq 0 30); do
+  # Wider scan window to avoid false NO-GO when local dev services occupy default ports.
+  for offset in $(seq 0 200); do
     local candidate=$((preferred + offset))
     if ! lsof -ti tcp:"${candidate}" >/dev/null 2>&1; then
       echo "${candidate}"
@@ -29,11 +30,19 @@ pick_available_port() {
     fi
   done
 
+  # Final fallback: ask Node to allocate an ephemeral free port.
+  local fallback
+  fallback="$(node -e 'const net=require("net");const s=net.createServer();s.listen(0,"127.0.0.1",()=>{const p=s.address().port;console.log(p);s.close();});s.on("error",()=>process.exit(1));' 2>/dev/null || true)"
+  if [[ -n "${fallback}" ]]; then
+    echo "${fallback}"
+    return 0
+  fi
+
   return 1
 }
 
 if ! RESOLVED_PORT="$(pick_available_port "${PORT}")"; then
-  echo "Unable to find a free port near ${PORT}."
+  echo "Unable to find a free port for requested base ${PORT}."
   exit 1
 fi
 
